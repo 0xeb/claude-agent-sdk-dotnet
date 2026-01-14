@@ -2,6 +2,7 @@
 // Port of claude-agent-sdk-python/examples/include_partial_messages.py
 
 using Claude.AgentSdk;
+using ClaudeApi = Claude.AgentSdk.Claude;
 
 Console.WriteLine("Claude Agent SDK for .NET - Partial Message Streaming Example");
 Console.WriteLine("==============================================================\n");
@@ -14,16 +15,12 @@ Console.WriteLine("- Getting early results before the full response is complete"
 Console.WriteLine();
 
 // Enable partial message streaming
-var options = new ClaudeAgentOptions
-{
-    IncludePartialMessages = true,
-    Model = "claude-sonnet-4-5",
-    MaxTurns = 2,
-    Env = new Dictionary<string, string>
-    {
-        ["MAX_THINKING_TOKENS"] = "8000"
-    }
-};
+var options = ClaudeApi.Options()
+    .IncludePartialMessages()
+    .Model("claude-sonnet-4-5")
+    .MaxTurns(2)
+    .Env("MAX_THINKING_TOKENS", "8000")
+    .Build();
 
 await using var client = new ClaudeSDKClient(options);
 await client.ConnectAsync();

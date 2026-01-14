@@ -10,8 +10,8 @@ namespace Claude.AgentSdk.Tests;
 /// </summary>
 public class HooksIntegrationTests
 {
-    [Fact]
-    public async Task PreToolUseHook_IsInvokedBeforeToolExecution()
+    [IntegrationFact]
+    public async Task PreToolUseHook_IsInvokedBeforeToolExecution()      
     {
         var hookInvocations = new List<JsonElement>();
 
@@ -48,8 +48,8 @@ public class HooksIntegrationTests
         Assert.True(hookInvocations.Count >= 0, "Test completed");
     }
 
-    [Fact]
-    public async Task PostToolUseHook_IsInvokedAfterToolExecution()
+    [IntegrationFact]
+    public async Task PostToolUseHook_IsInvokedAfterToolExecution()       
     {
         var postToolInvocations = new List<JsonElement>();
 
@@ -84,7 +84,7 @@ public class HooksIntegrationTests
         Assert.True(postToolInvocations.Count >= 0, "Test completed");
     }
 
-    [Fact]
+    [IntegrationFact]
     public async Task Hook_CanBlockToolExecution()
     {
         var toolBlocked = false;
@@ -134,7 +134,7 @@ public class HooksIntegrationTests
         Assert.True(toolBlocked || !toolBlocked, "Test completed - blocking depends on Claude's behavior");
     }
 
-    [Fact]
+    [IntegrationFact]
     public async Task Hook_MatcherFiltersCorrectTool()
     {
         var bashHookCalled = false;
@@ -180,7 +180,7 @@ public class HooksIntegrationTests
             "Test completed - hook invocation depends on Claude's tool choice");
     }
 
-    [Fact]
+    [IntegrationFact]
     public async Task MultipleHooks_AreChainedCorrectly()
     {
         var hookOrder = new List<int>();

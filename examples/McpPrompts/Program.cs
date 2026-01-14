@@ -4,6 +4,7 @@
 using System.Text.Json;
 using Claude.AgentSdk;
 using Claude.AgentSdk.Mcp;
+using ClaudeApi = Claude.AgentSdk.Claude;
 
 Console.WriteLine("Claude Agent SDK for .NET - MCP Prompts Example");
 Console.WriteLine("================================================\n");
@@ -111,14 +112,10 @@ var mcpConfig = new McpSdkServerConfig
 };
 
 // Create options with the MCP server
-var options = new ClaudeAgentOptions
-{
-    McpServers = new Dictionary<string, object>
-    {
-        ["prompts"] = mcpConfig
-    },
-    SystemPrompt = "You have access to an MCP prompt server. Use the available prompts to structure your responses."
-};
+var options = ClaudeApi.Options()
+    .McpServers(new Dictionary<string, object> { ["prompts"] = mcpConfig })
+    .SystemPrompt("You have access to an MCP prompt server. Use the available prompts to structure your responses.")
+    .Build();
 
 Console.WriteLine("MCP Prompts server configured with the following prompts:");
 Console.WriteLine("  - code_review: Generate code review prompts");

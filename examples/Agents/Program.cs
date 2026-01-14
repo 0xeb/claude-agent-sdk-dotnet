@@ -48,20 +48,16 @@ async Task ExampleCodeReviewer()
 {
     Console.WriteLine("=== Code Reviewer Agent Example ===\n");
 
-    var options = new ClaudeAgentOptions
-    {
-        Agents = new Dictionary<string, AgentDefinition>
-        {
-            ["code-reviewer"] = new AgentDefinition(
-                Description: "Reviews code for best practices and potential issues",
-                Prompt: "You are a code reviewer. Analyze code for bugs, performance issues, " +
-                        "security vulnerabilities, and adherence to best practices. " +
-                        "Provide constructive feedback.",
-                Tools: ["Read", "Grep"],
-                Model: "sonnet"
-            )
-        }
-    };
+    var options = ClaudeApi.Options()
+        .Agents(a => a.Add(
+            "code-reviewer",
+            "Reviews code for best practices and potential issues",
+            "You are a code reviewer. Analyze code for bugs, performance issues, " +
+            "security vulnerabilities, and adherence to best practices. " +
+            "Provide constructive feedback.",
+            tools: ["Read", "Grep"],
+            model: "sonnet"))
+        .Build();
 
     await foreach (var message in ClaudeApi.QueryAsync(
         "Use the code-reviewer agent to review the code in src/Claude.AgentSdk/Types.cs",
@@ -89,19 +85,15 @@ async Task ExampleDocWriter()
 {
     Console.WriteLine("=== Documentation Writer Agent Example ===\n");
 
-    var options = new ClaudeAgentOptions
-    {
-        Agents = new Dictionary<string, AgentDefinition>
-        {
-            ["doc-writer"] = new AgentDefinition(
-                Description: "Writes comprehensive documentation",
-                Prompt: "You are a technical documentation expert. Write clear, comprehensive " +
-                        "documentation with examples. Focus on clarity and completeness.",
-                Tools: ["Read", "Write", "Edit"],
-                Model: "sonnet"
-            )
-        }
-    };
+    var options = ClaudeApi.Options()
+        .Agents(a => a.Add(
+            "doc-writer",
+            "Writes comprehensive documentation",
+            "You are a technical documentation expert. Write clear, comprehensive " +
+            "documentation with examples. Focus on clarity and completeness.",
+            tools: ["Read", "Write", "Edit"],
+            model: "sonnet"))
+        .Build();
 
     await foreach (var message in ClaudeApi.QueryAsync(
         "Use the doc-writer agent to explain what AgentDefinition is used for",
@@ -129,24 +121,19 @@ async Task ExampleMultipleAgents()
 {
     Console.WriteLine("=== Multiple Agents Example ===\n");
 
-    var options = new ClaudeAgentOptions
-    {
-        Agents = new Dictionary<string, AgentDefinition>
-        {
-            ["analyzer"] = new AgentDefinition(
-                Description: "Analyzes code structure and patterns",
-                Prompt: "You are a code analyzer. Examine code structure, patterns, and architecture.",
-                Tools: ["Read", "Grep", "Glob"]
-            ),
-            ["tester"] = new AgentDefinition(
-                Description: "Creates and runs tests",
-                Prompt: "You are a testing expert. Write comprehensive tests and ensure code quality.",
-                Tools: ["Read", "Write", "Bash"],
-                Model: "sonnet"
-            )
-        },
-        SettingSources = [SettingSource.User, SettingSource.Project]
-    };
+    var options = ClaudeApi.Options()
+        .Agents(a => a
+            .Add("analyzer",
+                "Analyzes code structure and patterns",
+                "You are a code analyzer. Examine code structure, patterns, and architecture.",
+                "Read", "Grep", "Glob")
+            .Add("tester",
+                "Creates and runs tests",
+                "You are a testing expert. Write comprehensive tests and ensure code quality.",
+                tools: ["Read", "Write", "Bash"],
+                model: "sonnet"))
+        .SettingSources(SettingSource.User, SettingSource.Project)
+        .Build();
 
     await foreach (var message in ClaudeApi.QueryAsync(
         "Use the analyzer agent to find all C# files in the examples/ directory",

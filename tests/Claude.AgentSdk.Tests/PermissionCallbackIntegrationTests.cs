@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Claude.AgentSdk;
 using Xunit;
+using FactAttribute = Claude.AgentSdk.Tests.IntegrationFactAttribute;
 
 namespace Claude.AgentSdk.Tests;
 
@@ -11,7 +12,7 @@ namespace Claude.AgentSdk.Tests;
 public class PermissionCallbackIntegrationTests
 {
     [Fact]
-    public async Task CanUseTool_IsInvokedForToolCalls()
+    public async Task CanUseTool_IsInvokedForToolCalls()        
     {
         var permissionChecks = new List<string>();
 

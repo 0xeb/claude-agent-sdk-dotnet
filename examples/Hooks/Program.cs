@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Claude.AgentSdk;
+using ClaudeApi = Claude.AgentSdk.Claude;
 
 Console.WriteLine("Claude Agent SDK for .NET - Hooks Examples");
 Console.WriteLine("==========================================\n");
@@ -136,14 +137,10 @@ async Task ExamplePreToolUse()
     Console.WriteLine("=== PreToolUse Example ===");
     Console.WriteLine("This example demonstrates how PreToolUse can block some bash commands.\n");
 
-    var options = new ClaudeAgentOptions
-    {
-        AllowedTools = ["Bash"],
-        Hooks = new Dictionary<HookEvent, IReadOnlyList<HookMatcher>>
-        {
-            [HookEvent.PreToolUse] = [new HookMatcher("Bash", [CheckBashCommand])]
-        }
-    };
+    var options = ClaudeApi.Options()
+        .AllowTools("Bash")
+        .Hooks(h => h.PreToolUse("Bash", CheckBashCommand))
+        .Build();
 
     await using var client = new ClaudeSDKClient(options);
     await client.ConnectAsync();
@@ -179,14 +176,10 @@ async Task ExamplePostToolUse()
     Console.WriteLine("=== PostToolUse Example ===");
     Console.WriteLine("This example shows how PostToolUse can provide feedback.\n");
 
-    var options = new ClaudeAgentOptions
-    {
-        AllowedTools = ["Bash"],
-        Hooks = new Dictionary<HookEvent, IReadOnlyList<HookMatcher>>
-        {
-            [HookEvent.PostToolUse] = [new HookMatcher("Bash", [ReviewToolOutput])]
-        }
-    };
+    var options = ClaudeApi.Options()
+        .AllowTools("Bash")
+        .Hooks(h => h.PostToolUse("Bash", ReviewToolOutput))
+        .Build();
 
     await using var client = new ClaudeSDKClient(options);
     await client.ConnectAsync();

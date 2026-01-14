@@ -2,6 +2,7 @@
 // Port of claude-agent-sdk-python/examples/streaming_mode.py
 
 using Claude.AgentSdk;
+using ClaudeApi = Claude.AgentSdk.Claude;
 
 Console.WriteLine("Claude Agent SDK for .NET - Streaming Mode Examples");
 Console.WriteLine("====================================================\n");
@@ -170,15 +171,11 @@ async Task ExampleWithOptions()
 {
     Console.WriteLine("=== Custom Options Example ===\n");
 
-    var options = new ClaudeAgentOptions
-    {
-        AllowedTools = ["Read", "Write"],
-        SystemPrompt = "You are a helpful coding assistant.",
-        Env = new Dictionary<string, string>
-        {
-            ["ANTHROPIC_MODEL"] = "claude-sonnet-4-5"
-        }
-    };
+    var options = ClaudeApi.Options()
+        .AllowTools("Read", "Write")
+        .SystemPrompt("You are a helpful coding assistant.")
+        .Env("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+        .Build();
 
     await using var client = new ClaudeSDKClient(options);
     await client.ConnectAsync();

@@ -16,7 +16,7 @@ namespace Claude.AgentSdk;
 /// <para>
 /// This client provides full control over the conversation flow with support
 /// for streaming, interrupts, and dynamic message sending. For simple one-shot
-/// queries, consider using the <see cref="Claude.QueryAsync"/> method instead.
+/// queries, consider using the <see cref="Claude.QueryAsync(string, ClaudeAgentOptions?, ITransport?, CancellationToken)"/> method instead.
 /// </para>
 ///
 /// <para><b>Key features:</b></para>
@@ -72,6 +72,7 @@ public class ClaudeSDKClient : IAsyncDisposable
     private readonly ITransport? _customTransport;
     private ITransport? _transport;
     private QueryHandler? _queryHandler;
+    private Task? _inputTask;
 
     /// <summary>
     /// Initialize Claude SDK client.
@@ -97,14 +98,36 @@ public class ClaudeSDKClient : IAsyncDisposable
         string? prompt = null,
         CancellationToken cancellationToken = default)
     {
+        await ConnectInternalAsync(prompt, promptStream: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Connect to Claude with an input message stream.
+    /// </summary>
+    /// <remarks>
+    /// Passing a stream will start streaming it immediately after initialization.
+    /// If the stream completes, stdin will be closed and the session may no longer accept new input.
+    /// </remarks>
+    public async Task ConnectAsync(
+        IAsyncEnumerable<Dictionary<string, object?>> promptStream,
+        CancellationToken cancellationToken = default)
+    {
+        await ConnectInternalAsync(prompt: null, promptStream, cancellationToken);
+    }
+
+    private async Task ConnectInternalAsync(
+        string? prompt,
+        IAsyncEnumerable<Dictionary<string, object?>>? promptStream,
+        CancellationToken cancellationToken)
+    {
         // Validate permission settings
         if (_options.CanUseTool != null)
         {
             if (prompt != null)
             {
                 throw new ArgumentException(
-                    "can_use_tool callback requires streaming mode. " +
-                    "Please provide prompt as null for interactive mode."
+                    "can_use_tool callback requires streaming mode. " +   
+                    "Please provide prompt as null for interactive mode or use the stream overload."
                 );
             }
 
@@ -117,9 +140,9 @@ public class ClaudeSDKClient : IAsyncDisposable
             }
         }
 
-        // Create transport
+        // Create transport (ClaudeSDKClient always uses streaming mode)
         _transport = _customTransport ?? new SubprocessTransport(
-            prompt ?? (object)CreateEmptyStream(),
+            CreateEmptyStream(),
             _options.CanUseTool != null
                 ? new ClaudeAgentOptions
                 {
@@ -179,6 +202,20 @@ public class ClaudeSDKClient : IAsyncDisposable
 
         await _queryHandler.StartAsync(cancellationToken);
         await _queryHandler.InitializeAsync(cancellationToken);
+
+        // If we have an initial prompt stream, start streaming it after initialization.
+        if (promptStream != null)
+        {
+            _inputTask = Task.Run(
+                () => _queryHandler.StreamInputAsync(promptStream, cancellationToken),
+                cancellationToken
+            );
+        }
+        else if (prompt != null)
+        {
+            // Back-compat: if a string prompt was provided, send it as the first user message.
+            await QueryAsync(prompt, cancellationToken: cancellationToken);
+        }
     }
 
     private async Task InitializeSdkMcpServersAsync(CancellationToken cancellationToken)
@@ -344,6 +381,13 @@ public class ClaudeSDKClient : IAsyncDisposable
     /// </summary>
     public async Task DisconnectAsync()
     {
+        if (_inputTask != null)
+        {
+            try { await _inputTask; }
+            catch { }
+            _inputTask = null;
+        }
+
         if (_queryHandler != null)
         {
             await _queryHandler.CloseAsync();
@@ -355,6 +399,13 @@ public class ClaudeSDKClient : IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        if (_inputTask != null)
+        {
+            try { await _inputTask; }
+            catch { }
+            _inputTask = null;
+        }
+
         if (_queryHandler != null)
             await _queryHandler.DisposeAsync();
         if (_transport != null)

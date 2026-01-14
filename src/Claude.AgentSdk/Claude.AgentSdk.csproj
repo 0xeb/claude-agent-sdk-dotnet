@@ -31,9 +31,9 @@
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
 
-    <!-- AOT Compatibility -->
-    <IsAotCompatible>true</IsAotCompatible>
-    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- AOT/Trimming -->
+    <!-- This library currently uses dynamic JSON (Dictionary/object/anonymous types) in the control protocol and MCP bridge paths.
+         NativeAOT and aggressive trimming are not guaranteed until those paths are made source-gen friendly. -->
 
     <!-- SourceLink for debugging -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>

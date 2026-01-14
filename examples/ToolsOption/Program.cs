@@ -68,11 +68,10 @@ async Task ExampleToolsArray()
     Console.WriteLine("Setting tools=['Read', 'Glob', 'Grep']");
     Console.WriteLine();
 
-    var options = new ClaudeAgentOptions
-    {
-        Tools = ["Read", "Glob", "Grep"],
-        MaxTurns = 1
-    };
+    var options = ClaudeApi.Options()
+        .Tools("Read", "Glob", "Grep")
+        .MaxTurns(1)
+        .Build();
 
     await foreach (var message in ClaudeApi.QueryAsync(
         "What tools do you have available? Just list them briefly.", options))
@@ -107,11 +106,10 @@ async Task ExampleToolsEmpty()
     Console.WriteLine("Setting tools=[] (disables all built-in tools)");
     Console.WriteLine();
 
-    var options = new ClaudeAgentOptions
-    {
-        Tools = [],  // Empty array
-        MaxTurns = 1
-    };
+    var options = ClaudeApi.Options()
+        .Tools()  // Empty - disables all built-in tools
+        .MaxTurns(1)
+        .Build();
 
     await foreach (var message in ClaudeApi.QueryAsync(
         "What tools do you have available? Just list them briefly.", options))
@@ -146,12 +144,10 @@ async Task ExampleToolsPreset()
     Console.WriteLine("Setting tools to null (default - all Claude Code tools)");
     Console.WriteLine();
 
-    // When Tools is null, Claude Code uses its default tool set
-    var options = new ClaudeAgentOptions
-    {
-        // Tools = null (default) means all tools available
-        MaxTurns = 1
-    };
+    // When Tools is not set, Claude Code uses its default tool set
+    var options = ClaudeApi.Options()
+        .MaxTurns(1)  // Tools not set = all tools available
+        .Build();
 
     await foreach (var message in ClaudeApi.QueryAsync(
         "What tools do you have available? Just list them briefly.", options))
