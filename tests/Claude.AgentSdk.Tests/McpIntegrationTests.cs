@@ -2,6 +2,7 @@ using System.Text.Json;
 using Claude.AgentSdk;
 using Claude.AgentSdk.Mcp;
 using Xunit;
+using FactAttribute = Claude.AgentSdk.Tests.IntegrationFactAttribute;
 
 namespace Claude.AgentSdk.Tests;
 

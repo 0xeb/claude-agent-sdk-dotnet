@@ -29,9 +29,10 @@ internal class QueryHandler : IAsyncDisposable
     private CancellationTokenSource? _readCts;
     private bool _initialized;
     private bool _closed;
+    private int _closeState;
     private int _requestCounter;
     private int _nextCallbackId;
-    private TaskCompletionSource _firstResultEvent = new();
+    private TaskCompletionSource _firstResultEvent = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private JsonElement? _initializationResult;
 
     public QueryHandler(
@@ -62,6 +63,9 @@ internal class QueryHandler : IAsyncDisposable
     /// </summary>
     public async Task<JsonElement?> InitializeAsync(CancellationToken cancellationToken = default)
     {
+        if (_initialized)
+            return _initializationResult;
+
         // Build hooks configuration for initialization
         var hooksConfig = new Dictionary<string, List<Dictionary<string, object?>>>();
 
@@ -436,7 +440,7 @@ internal class QueryHandler : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var requestId = $"req_{Interlocked.Increment(ref _requestCounter)}_{Guid.NewGuid():N}";
-        var tcs = new TaskCompletionSource<JsonElement>();
+        var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         await _lock.WaitAsync(cancellationToken);
         try
@@ -544,8 +548,11 @@ internal class QueryHandler : IAsyncDisposable
             await _transport.WriteAsync(JsonSerializer.Serialize(message) + "\n", cancellationToken);
         }
 
-        // If we have hooks, wait for first result before closing
-        if (_options.Hooks != null && _options.Hooks.Count > 0)
+        // If we have SDK MCP servers or hooks, wait for the first result before closing stdin
+        // to allow bidirectional control protocol communication (matches Python behavior).
+        var hasHooks = _options.Hooks != null && _options.Hooks.Count > 0;
+        var hasSdkMcpServers = _sdkMcpBridges.Count > 0;
+        if (hasHooks || hasSdkMcpServers)
         {
             try
             {
@@ -576,17 +583,31 @@ internal class QueryHandler : IAsyncDisposable
     /// </summary>
     public async Task CloseAsync()
     {
+        if (Interlocked.Exchange(ref _closeState, 1) == 1)
+            return;
+
         _closed = true;
 
-        if (_readCts != null)
+        var readCts = Interlocked.Exchange(ref _readCts, null);
+        if (readCts != null)
         {
-            await _readCts.CancelAsync();
-            _readCts.Dispose();
+            try
+            {
+                await readCts.CancelAsync();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            finally
+            {
+                readCts.Dispose();
+            }
         }
 
-        if (_readTask != null)
+        var readTask = Interlocked.Exchange(ref _readTask, null);
+        if (readTask != null)
         {
-            try { await _readTask; }
+            try { await readTask; }
             catch { }
         }
 

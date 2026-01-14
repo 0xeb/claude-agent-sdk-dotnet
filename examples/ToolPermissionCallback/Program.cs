@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Claude.AgentSdk;
+using ClaudeApi = Claude.AgentSdk.Claude;
 
 Console.WriteLine("Claude Agent SDK for .NET - Tool Permission Callback Example");
 Console.WriteLine("=============================================================\n");
@@ -111,12 +112,11 @@ Task<PermissionResult> MyPermissionCallback(
 }
 
 // Configure options with our callback
-var options = new ClaudeAgentOptions
-{
-    CanUseTool = MyPermissionCallback,
-    PermissionMode = PermissionMode.Default,
-    Cwd = "."
-};
+var options = ClaudeApi.Options()
+    .CanUseTool(MyPermissionCallback)
+    .PermissionMode(PermissionMode.Default)
+    .Cwd(".")
+    .Build();
 
 // Create client and send a query that will use multiple tools
 await using var client = new ClaudeSDKClient(options);

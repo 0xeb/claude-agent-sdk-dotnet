@@ -127,12 +127,21 @@ public class SubprocessTransport : ITransport
     private static string? FindBundledCli()
     {
         var cliName = OperatingSystem.IsWindows() ? "claude.exe" : "claude";
-        var assemblyDir = Path.GetDirectoryName(typeof(SubprocessTransport).Assembly.Location);
-        if (assemblyDir == null) return null;
+        var assemblyDir = AppContext.BaseDirectory;
+        if (string.IsNullOrWhiteSpace(assemblyDir)) return null;
 
         var bundledPath = Path.Combine(assemblyDir, "_bundled", cliName);
         return File.Exists(bundledPath) ? bundledPath : null;
     }
+
+    private static string PermissionModeToCliValue(PermissionMode mode) => mode switch
+    {
+        PermissionMode.Default => "default",
+        PermissionMode.AcceptEdits => "acceptEdits",
+        PermissionMode.Plan => "plan",
+        PermissionMode.BypassPermissions => "bypassPermissions",
+        _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unsupported permission mode")
+    };
 
     private string? BuildSettingsValue()
     {
@@ -230,11 +239,15 @@ public class SubprocessTransport : ITransport
         if (_options.Betas.Count > 0)
             cmd.AddRange(["--betas", string.Join(",", _options.Betas)]);
 
-        if (_options.PermissionPromptToolName != null)
-            cmd.AddRange(["--permission-prompt-tool", _options.PermissionPromptToolName]);
+        var permissionPromptToolName = _options.PermissionPromptToolName;
+        if (permissionPromptToolName == null && _options.CanUseTool != null)
+            permissionPromptToolName = "stdio";
+
+        if (permissionPromptToolName != null)
+            cmd.AddRange(["--permission-prompt-tool", permissionPromptToolName]);
 
         if (_options.PermissionMode.HasValue)
-            cmd.AddRange(["--permission-mode", _options.PermissionMode.Value.ToString().ToLowerInvariant()]);
+            cmd.AddRange(["--permission-mode", PermissionModeToCliValue(_options.PermissionMode.Value)]);
 
         if (_options.ContinueConversation)
             cmd.Add("--continue");
@@ -315,6 +328,28 @@ public class SubprocessTransport : ITransport
             cmd.AddRange(["--print", "--", _prompt.ToString()!]);
         }
 
+        // Check if command line is too long (Windows limitation) and spill agents JSON to a temp file if needed.
+        var cmdStr = string.Join(" ", cmd);
+        if (cmdStr.Length > CmdLengthLimit && _options.Agents != null && _options.Agents.Count > 0)
+        {
+            try
+            {
+                var agentsIdx = cmd.IndexOf("--agents");
+                if (agentsIdx >= 0 && agentsIdx + 1 < cmd.Count)
+                {
+                    var agentsJsonValue = cmd[agentsIdx + 1];
+                    var tempFile = Path.Combine(Path.GetTempPath(), $"claude-agent-sdk-agents-{Guid.NewGuid():N}.json");
+                    File.WriteAllText(tempFile, agentsJsonValue, Encoding.UTF8);
+                    _tempFiles.Add(tempFile);
+                    cmd[agentsIdx + 1] = $"@{tempFile}";
+                }
+            }
+            catch
+            {
+                // Best-effort only.
+            }
+        }
+
         return cmd;
     }
 
@@ -329,13 +364,16 @@ public class SubprocessTransport : ITransport
 
         var cmd = BuildCommand();
 
+        var shouldReadStderr = _options.StderrCallback != null ||
+                               _options.ExtraArgs.ContainsKey("debug-to-stderr");
+
         var startInfo = new ProcessStartInfo
         {
             FileName = cmd[0],
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            RedirectStandardError = shouldReadStderr,
             CreateNoWindow = true
         };
 
@@ -366,13 +404,9 @@ public class SubprocessTransport : ITransport
 
             _stdin = _process.StandardInput;
             _stdout = _process.StandardOutput;
-            _stderr = _process.StandardError;
-
-            // Start stderr reader if we have a callback or debug mode
-            var shouldReadStderr = _options.StderrCallback != null ||
-                                   _options.ExtraArgs.ContainsKey("debug-to-stderr");
             if (shouldReadStderr)
             {
+                _stderr = _process.StandardError;
                 _stderrTask = Task.Run(() => HandleStderrAsync(cancellationToken), cancellationToken);
             }
 
@@ -468,65 +502,71 @@ public class SubprocessTransport : ITransport
         if (_process == null || _stdout == null)
             throw new CliConnectionException("Not connected");
 
-        var buffer = new StringBuilder();
-        var charBuffer = new char[4096];
+        var jsonBuffer = new StringBuilder();
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            int read;
+            string? line;
             try
             {
-                read = await _stdout.ReadAsync(charBuffer.AsMemory(), cancellationToken);
+                line = await _stdout.ReadLineAsync(cancellationToken);
             }
             catch (OperationCanceledException)
             {
                 break;
             }
 
-            if (read == 0)
+            if (line == null)
                 break;
 
-            buffer.Append(charBuffer, 0, read);
+            var lineStr = line.Trim();
+            if (string.IsNullOrEmpty(lineStr))
+                continue;
 
-            // Try to parse complete JSON lines
-            var content = buffer.ToString();
-            var newlineIndex = content.IndexOf('\n');
+            jsonBuffer.Append(lineStr);
 
-            while (newlineIndex >= 0)
+            if (jsonBuffer.Length > _maxBufferSize)
             {
-                var line = content[..newlineIndex].Trim();
-                content = content[(newlineIndex + 1)..];
-
-                if (!string.IsNullOrEmpty(line))
-                {
-                    if (buffer.Length > _maxBufferSize)
-                    {
-                        buffer.Clear();
-                        throw new JsonDecodeException(
-                            line,
-                            new InvalidOperationException($"Buffer size exceeds limit {_maxBufferSize}")
-                        );
-                    }
-
-                    JsonElement json;
-                    try
-                    {
-                        json = JsonSerializer.Deserialize<JsonElement>(line);
-                    }
-                    catch (JsonException ex)
-                    {
-                        // Incomplete JSON, keep buffering
-                        continue;
-                    }
-
-                    yield return json;
-                }
-
-                newlineIndex = content.IndexOf('\n');
+                var bufferLength = jsonBuffer.Length;
+                jsonBuffer.Clear();
+                throw new JsonDecodeException(
+                    $"JSON message exceeded maximum buffer size of {_maxBufferSize} bytes",
+                    new InvalidOperationException($"Buffer size {bufferLength} exceeds limit {_maxBufferSize}")
+                );
             }
 
-            buffer.Clear();
-            buffer.Append(content);
+            JsonElement json;
+            try
+            {
+                json = JsonSerializer.Deserialize<JsonElement>(jsonBuffer.ToString());
+            }
+            catch (JsonException)
+            {
+                // Speculatively decode until we have a full JSON object.
+                continue;
+            }
+
+            jsonBuffer.Clear();
+            yield return json;
+        }
+
+        // Flush any remaining buffered JSON at EOF.
+        if (jsonBuffer.Length > 0)
+        {
+            var trailing = default(JsonElement);
+            var hasTrailing = false;
+            try
+            {
+                trailing = JsonSerializer.Deserialize<JsonElement>(jsonBuffer.ToString());
+                hasTrailing = true;
+            }
+            catch (JsonException)
+            {
+                // Ignore incomplete trailing JSON.
+            }
+
+            if (hasTrailing)
+                yield return trailing;
         }
 
         // Check process exit

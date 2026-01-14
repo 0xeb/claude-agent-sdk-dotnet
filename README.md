@@ -17,8 +17,8 @@ A modern .NET library for interacting with the Claude Code CLI, providing both a
 - Tool permission callbacks with allow/deny control
 - In-process MCP server support (tools, prompts, resources)
 - Cross-platform: Windows, Linux, macOS
-- AOT-compatible with source-generated JSON serialization
-- Well-tested: 82 tests (63 unit + 19 integration)
+- Source-generated JSON models for message types
+- Well-tested: 109 tests (90 unit + 19 integration; integration tests are disabled by default)
 
 ## Prerequisites
 
@@ -74,13 +74,12 @@ await foreach (var msg in client.ReceiveResponseAsync())
 ### With Options
 
 ```csharp
-var options = new ClaudeAgentOptions
-{
-    SystemPrompt = "You are a helpful coding assistant.",
-    MaxTurns = 5,
-    Model = "claude-sonnet-4-20250514",
-    PermissionMode = PermissionMode.AcceptEdits
-};
+var options = Claude.Options()
+    .SystemPrompt("You are a helpful coding assistant.")
+    .MaxTurns(5)
+    .Model("claude-sonnet-4-20250514")
+    .AcceptEdits()
+    .Build();
 
 await foreach (var msg in Claude.QueryAsync("Explain async/await", options))
 {
@@ -91,74 +90,63 @@ await foreach (var msg in Claude.QueryAsync("Explain async/await", options))
 ### Tool Permission Callback
 
 ```csharp
-var options = new ClaudeAgentOptions
-{
-    CanUseTool = async (toolName, input, context, ct) =>
+var options = Claude.Options()
+    .CanUseTool(async (toolName, input, context, ct) =>
     {
         if (toolName == "Bash" && input.GetProperty("command").GetString()?.Contains("rm") == true)
             return new PermissionResultDeny("Destructive commands not allowed");
         return new PermissionResultAllow();
-    }
-};
+    })
+    .Build();
 ```
 
 ### Hooks
 
 ```csharp
-var options = new ClaudeAgentOptions
-{
-    Hooks = new Dictionary<HookEvent, IReadOnlyList<HookMatcher>>
-    {
-        [HookEvent.PreToolUse] = [
-            new HookMatcher(
-                Matcher: "Bash",
-                Hooks: [(input, toolUseId, ctx, ct) =>
-                {
-                    Console.WriteLine($"[Hook] Bash: {input}");
-                    return Task.FromResult(new HookOutput { Continue = true });
-                }]
-            )
-        ]
-    }
-};
+var options = Claude.Options()
+    .AllowTools("Bash")
+    .Hooks(h => h
+        .PreToolUse("Bash", (input, toolUseId, ctx, ct) =>
+        {
+            Console.WriteLine($"[Hook] Bash: {input}");
+            return Task.FromResult(new HookOutput { Continue = true });
+        }))
+    .Build();
 ```
 
 ### MCP Tools (In-Process)
 
 ```csharp
-var handlers = new McpServerHandlers
-{
-    ListTools = ct => Task.FromResult<IReadOnlyList<McpToolDefinition>>([
-        new McpToolDefinition
-        {
-            Name = "add",
-            Description = "Add two numbers",
-            InputSchema = JsonSerializer.SerializeToElement(new
-            {
-                type = "object",
-                properties = new { a = new { type = "number" }, b = new { type = "number" } },
-                required = new[] { "a", "b" }
-            })
-        }
-    ]),
-    CallTool = (name, args, ct) =>
-    {
-        var a = args.GetProperty("a").GetDouble();
-        var b = args.GetProperty("b").GetDouble();
-        return Task.FromResult(new McpToolResult
-        {
-            Content = [new McpContent { Type = "text", Text = (a + b).ToString() }]
-        });
-    }
-};
+using Claude.AgentSdk;
+using Claude.AgentSdk.Mcp;
 
-var options = new ClaudeAgentOptions
-{
-    McpServers = new Dictionary<string, object>
-    {
-        ["calculator"] = new McpSdkServerConfig { Name = "calculator", Handlers = handlers }
-    }
-};
+var options = Claude.Options()
+    .McpServers(m => m.AddSdk("calculator", s => s
+        .Tool("add", (double a, double b) => a + b, "Add two numbers")))
+    .AllowAllTools()
+    .Build();
+```
+
+### Custom Agents
+
+```csharp
+var options = Claude.Options()
+    .Agents(a => a
+        .Add("reviewer", "Reviews code", "You are a code reviewer.", "Read", "Grep")
+        .Add("writer", "Writes code", "You are a clean coder.", tools: ["Read", "Write"]))
+    .Build();
+```
+
+### Sandbox Configuration
+
+```csharp
+var options = Claude.Options()
+    .Sandbox(s => s
+        .Enable()
+        .AutoAllowBash()
+        .ExcludeCommands("rm", "sudo")
+        .Network(n => n.AllowLocalBinding()))
+    .Build();
 ```
 
 ## Configuration
@@ -214,9 +202,19 @@ See the `examples/` directory:
 ## Status & Parity
 
 - **Current version:** 0.1.0
-- **Status:** Production ready
+- **Status:** Preview (API and behavior may change)
 - **Parity:** Designed to match the Python Claude Agent SDK API, behavior, and ergonomics
-- **Tests:** 82 tests (63 unit + 19 integration)
+- **Tests:** 109 tests (90 unit + 19 integration; integration tests are disabled by default)
+
+### Known Limitations
+
+- `control_cancel_request` is currently ignored (cancellation of in-flight control requests is not implemented yet; matches Python SDK TODO).
+
+### Running Integration Tests
+
+Integration tests require a working Claude Code CLI and are disabled by default.
+
+- Enable them with: `CLAUDE_AGENT_SDK_RUN_INTEGRATION_TESTS=1 dotnet test`
 
 **Canonical rule:** The Python `claude-agent-sdk` is the canonical reference. This .NET port tracks its behavior and API.
 

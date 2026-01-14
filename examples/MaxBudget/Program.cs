@@ -47,10 +47,9 @@ async Task WithReasonableBudget()
 {
     Console.WriteLine("=== With Reasonable Budget ($0.10) ===");
 
-    var options = new ClaudeAgentOptions
-    {
-        MaxBudgetUsd = 0.10m  // 10 cents - plenty for a simple query
-    };
+    var options = ClaudeApi.Options()
+        .MaxBudget(0.10m)  // 10 cents - plenty for a simple query
+        .Build();
 
     await foreach (var message in ClaudeApi.QueryAsync("What is 2 + 2?", options))
     {
@@ -78,10 +77,9 @@ async Task WithTightBudget()
 {
     Console.WriteLine("=== With Tight Budget ($0.0001) ===");
 
-    var options = new ClaudeAgentOptions
-    {
-        MaxBudgetUsd = 0.0001m  // Very small budget - will be exceeded quickly
-    };
+    var options = ClaudeApi.Options()
+        .MaxBudget(0.0001m)  // Very small budget - will be exceeded quickly
+        .Build();
 
     await foreach (var message in ClaudeApi.QueryAsync(
         "Read the README.md file and summarize it", options))

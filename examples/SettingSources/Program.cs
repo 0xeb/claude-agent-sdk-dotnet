@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Claude.AgentSdk;
+using ClaudeApi = Claude.AgentSdk.Claude;
 
 Console.WriteLine("Claude Agent SDK for .NET - Setting Sources Examples");
 Console.WriteLine("=====================================================\n");
@@ -79,11 +80,10 @@ async Task ExampleDefault()
     var sdkDir = Directory.GetParent(Directory.GetCurrentDirectory())?.Parent?.FullName
                  ?? Directory.GetCurrentDirectory();
 
-    var options = new ClaudeAgentOptions
-    {
-        Cwd = sdkDir
+    var options = ClaudeApi.Options()
+        .Cwd(sdkDir)
         // No SettingSources - isolated environment
-    };
+        .Build();
 
     await using var client = new ClaudeSDKClient(options);
     await client.ConnectAsync();
@@ -117,11 +117,10 @@ async Task ExampleUserOnly()
     var sdkDir = Directory.GetParent(Directory.GetCurrentDirectory())?.Parent?.FullName
                  ?? Directory.GetCurrentDirectory();
 
-    var options = new ClaudeAgentOptions
-    {
-        SettingSources = [SettingSource.User],
-        Cwd = sdkDir
-    };
+    var options = ClaudeApi.Options()
+        .SettingSources(SettingSource.User)
+        .Cwd(sdkDir)
+        .Build();
 
     await using var client = new ClaudeSDKClient(options);
     await client.ConnectAsync();
@@ -155,11 +154,10 @@ async Task ExampleProjectAndUser()
     var sdkDir = Directory.GetParent(Directory.GetCurrentDirectory())?.Parent?.FullName
                  ?? Directory.GetCurrentDirectory();
 
-    var options = new ClaudeAgentOptions
-    {
-        SettingSources = [SettingSource.User, SettingSource.Project],
-        Cwd = sdkDir
-    };
+    var options = ClaudeApi.Options()
+        .SettingSources(SettingSource.User, SettingSource.Project)
+        .Cwd(sdkDir)
+        .Build();
 
     await using var client = new ClaudeSDKClient(options);
     await client.ConnectAsync();

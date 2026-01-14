@@ -35,11 +35,10 @@ async Task WithOptionsExample()
 {
     Console.WriteLine("=== With Options Example ===");
 
-    var options = new ClaudeAgentOptions
-    {
-        SystemPrompt = "You are a helpful assistant that explains things simply.",
-        MaxTurns = 1
-    };
+    var options = ClaudeApi.Options()
+        .SystemPrompt("You are a helpful assistant that explains things simply.")
+        .MaxTurns(1)
+        .Build();
 
     await foreach (var message in ClaudeApi.QueryAsync(
         "Explain what C# is in one sentence.",
@@ -62,11 +61,10 @@ async Task WithToolsExample()
 {
     Console.WriteLine("=== With Tools Example ===");
 
-    var options = new ClaudeAgentOptions
-    {
-        AllowedTools = ["Read", "Write"],
-        SystemPrompt = "You are a helpful file assistant."
-    };
+    var options = ClaudeApi.Options()
+        .AllowTools("Read", "Write")
+        .SystemPrompt("You are a helpful file assistant.")
+        .Build();
 
     await foreach (var message in ClaudeApi.QueryAsync(
         "Create a file called hello.txt with 'Hello, World!' in it",

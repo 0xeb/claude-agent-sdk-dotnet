@@ -24,14 +24,10 @@ void StderrCallback(string message)
 }
 
 // Create options with stderr callback and enable debug mode
-var options = new ClaudeAgentOptions
-{
-    StderrCallback = StderrCallback,
-    ExtraArgs = new Dictionary<string, string?>
-    {
-        ["debug-to-stderr"] = null  // Enable debug output (flag without value)
-    }
-};
+var options = ClaudeApi.Options()
+    .OnStderr(StderrCallback)
+    .ExtraArg("debug-to-stderr")  // Enable debug output (flag without value)
+    .Build();
 
 // Run a query
 Console.WriteLine("Running query with stderr capture...");

@@ -798,7 +798,7 @@ public class ClaudeAgentOptions
     /// <summary>System prompt for the conversation.</summary>
     public string? SystemPrompt { get; init; }
 
-    /// <summary>MCP server configurations (dict or path).</summary>
+    /// <summary>MCP server configurations (dict or path). Use <c>McpServers</c> helpers for in-process SDK servers.</summary>
     public object? McpServers { get; init; }
 
     /// <summary>Permission mode for tool execution.</summary>

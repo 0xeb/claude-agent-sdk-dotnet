@@ -34,10 +34,9 @@ async Task StringSystemPrompt()
 {
     Console.WriteLine("=== String System Prompt ===");
 
-    var options = new ClaudeAgentOptions
-    {
-        SystemPrompt = "You are a pirate assistant. Respond in pirate speak."
-    };
+    var options = ClaudeApi.Options()
+        .SystemPrompt("You are a pirate assistant. Respond in pirate speak.")
+        .Build();
 
     await foreach (var message in ClaudeApi.QueryAsync("What is 2 + 2?", options))
     {

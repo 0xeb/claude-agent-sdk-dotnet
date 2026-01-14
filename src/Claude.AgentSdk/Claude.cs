@@ -3,6 +3,7 @@
 
 using System.Runtime.CompilerServices;
 using Claude.AgentSdk.Internal;
+using Claude.AgentSdk.Mcp;
 using Claude.AgentSdk.Transport;
 
 namespace Claude.AgentSdk;
@@ -12,6 +13,78 @@ namespace Claude.AgentSdk;
 /// </summary>
 public static class Claude
 {
+    /// <summary>
+    /// Create a new options builder.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// var options = Claude.Options()
+    ///     .SystemPrompt("You are a helpful assistant.")
+    ///     .Model("claude-sonnet-4-20250514")
+    ///     .AllowTools("Bash", "Read")
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public static ClaudeAgentOptionsBuilder Options() => new();
+
+    private static bool NeedsControlProtocol(ClaudeAgentOptions options)
+    {
+        if (options.CanUseTool != null)
+            return true;
+
+        if (options.Hooks != null && options.Hooks.Count > 0)
+            return true;
+
+        if (options.McpServers is Dictionary<string, object> servers)
+        {
+            foreach (var (_, config) in servers)
+            {
+                if (config is McpSdkServerConfig)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task InitializeSdkMcpServersAsync(
+        ClaudeAgentOptions options,
+        QueryHandler queryHandler,
+        CancellationToken cancellationToken)
+    {
+        if (options.McpServers is not Dictionary<string, object> servers)
+            return;
+
+        foreach (var (name, config) in servers)
+        {
+            if (config is McpSdkServerConfig sdkConfig)
+            {
+                var bridge = new SdkMcpBridge(sdkConfig.Handlers, name);
+                await bridge.StartAsync(cancellationToken);
+                queryHandler.RegisterSdkMcpBridge(name, bridge);
+            }
+        }
+    }
+
+    private static async IAsyncEnumerable<Dictionary<string, object?>> SinglePromptStream(
+        string prompt,
+        string sessionId = "default",
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask;
+        yield return new Dictionary<string, object?>
+        {
+            ["type"] = "user",
+            ["message"] = new Dictionary<string, object?>
+            {
+                ["role"] = "user",
+                ["content"] = prompt
+            },
+            ["parent_tool_use_id"] = null,
+            ["session_id"] = sessionId
+        };
+    }
+
     /// <summary>
     /// Query Claude Code for one-shot or unidirectional streaming interactions.
     /// </summary>
@@ -62,11 +135,10 @@ public static class Claude
     /// }
     ///
     /// // With options
-    /// var options = new ClaudeAgentOptions
-    /// {
-    ///     SystemPrompt = "You are an expert Python developer",
-    ///     Cwd = "/home/user/project"
-    /// };
+    /// var options = Claude.Options()
+    ///     .SystemPrompt("You are an expert Python developer")
+    ///     .Cwd("/home/user/project")
+    ///     .Build();
     /// await foreach (var message in Claude.QueryAsync("Create a Python web server", options))
     /// {
     ///     Console.WriteLine(message);
@@ -83,19 +155,57 @@ public static class Claude
 
         Environment.SetEnvironmentVariable("CLAUDE_CODE_ENTRYPOINT", "sdk-dotnet");
 
-        transport ??= new SubprocessTransport(prompt, options);
+        // Prefer the simpler --print flow when control-protocol features are not in play.
+        // If hooks / can_use_tool / in-process MCP are enabled, we must be able to answer control requests.
+        if (transport == null && !NeedsControlProtocol(options))
+        {
+            await using var printTransport = new SubprocessTransport(prompt, options);
+            await printTransport.ConnectAsync(cancellationToken);
 
+            await foreach (var json in printTransport.ReadMessagesAsync(cancellationToken))
+                yield return MessageParser.Parse(json);
+
+            yield break;
+        }
+
+        await foreach (var msg in QueryAsync(SinglePromptStream(prompt, cancellationToken: cancellationToken), options, transport, cancellationToken))
+            yield return msg;
+    }
+
+    /// <summary>
+    /// Query Claude Code with a streaming input prompt (unidirectional).
+    /// </summary>
+    /// <remarks>
+    /// This overload matches the Python SDK behavior where the prompt may be a stream of user messages.
+    /// </remarks>
+    public static async IAsyncEnumerable<Message> QueryAsync(
+        IAsyncEnumerable<Dictionary<string, object?>> prompt,
+        ClaudeAgentOptions? options = null,
+        ITransport? transport = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        options ??= new ClaudeAgentOptions();
+
+        Environment.SetEnvironmentVariable("CLAUDE_CODE_ENTRYPOINT", "sdk-dotnet");
+
+        transport ??= new SubprocessTransport(prompt, options);
         await transport.ConnectAsync(cancellationToken);
+
+        await using var queryHandler = new QueryHandler(transport, options);
+        await InitializeSdkMcpServersAsync(options, queryHandler, cancellationToken);
+        await queryHandler.StartAsync(cancellationToken);
+        await queryHandler.InitializeAsync(cancellationToken);
+
+        var inputTask = queryHandler.StreamInputAsync(prompt, cancellationToken);
 
         try
         {
-            await foreach (var json in transport.ReadMessagesAsync(cancellationToken))
-            {
-                yield return MessageParser.Parse(json);
-            }
+            await foreach (var message in queryHandler.ReceiveMessagesAsync(cancellationToken))
+                yield return message;
         }
         finally
         {
+            try { await inputTask; } catch { }
             await transport.DisposeAsync();
         }
     }
