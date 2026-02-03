@@ -23,7 +23,7 @@ public sealed class ClaudeAgentOptionsBuilder
     private IReadOnlyList<string>? _tools;
     private readonly List<string> _allowedTools = [];
     private readonly List<string> _disallowedTools = [];
-    private string? _systemPrompt;
+    private object? _systemPrompt;
     private object? _mcpServers;
     private PermissionMode? _permissionMode;
     private bool _continueConversation;
@@ -59,6 +59,24 @@ public sealed class ClaudeAgentOptionsBuilder
     public ClaudeAgentOptionsBuilder SystemPrompt(string prompt)
     {
         _systemPrompt = prompt;
+        return this;
+    }
+
+    /// <summary>Set the system prompt using a preset.</summary>
+    public ClaudeAgentOptionsBuilder SystemPrompt(SystemPromptPreset preset)
+    {
+        _systemPrompt = preset;
+        return this;
+    }
+
+    /// <summary>
+    /// Use Claude Code's default system prompt with additional instructions appended.
+    /// This is the recommended way to extend Claude Code's behavior while keeping its defaults.
+    /// </summary>
+    /// <param name="additionalInstructions">Instructions to append to Claude Code's system prompt.</param>
+    public ClaudeAgentOptionsBuilder AppendSystemPrompt(string additionalInstructions)
+    {
+        _systemPrompt = SystemPromptPreset.ClaudeCode(additionalInstructions);
         return this;
     }
 

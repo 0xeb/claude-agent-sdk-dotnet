@@ -204,9 +204,16 @@ public class SubprocessTransport : ITransport
         {
             cmd.AddRange(["--system-prompt", ""]);
         }
+        else if (_options.SystemPrompt is SystemPromptPreset preset)
+        {
+            if (!string.IsNullOrEmpty(preset.Append))
+            {
+                cmd.AddRange(["--append-system-prompt", preset.Append]);
+            }
+        }
         else
         {
-            cmd.AddRange(["--system-prompt", _options.SystemPrompt]);
+            cmd.AddRange(["--system-prompt", _options.SystemPrompt.ToString() ?? ""]);
         }
 
         // Tools

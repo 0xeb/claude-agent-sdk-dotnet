@@ -29,6 +29,17 @@ public sealed class ClaudeAgentOptionsBuilderTests
     }
 
     [Fact]
+    public void AppendSystemPrompt_SetsPresetWithAppend()
+    {
+        var options = Claude.Options()
+            .AppendSystemPrompt("Additional instructions here.")
+            .Build();
+
+        var preset = Assert.IsType<SystemPromptPreset>(options.SystemPrompt);
+        Assert.Equal("Additional instructions here.", preset.Append);
+    }
+
+    [Fact]
     public void Model_SetsValue()
     {
         var options = Claude.Options()
