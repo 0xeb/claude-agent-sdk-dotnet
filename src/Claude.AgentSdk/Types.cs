@@ -841,6 +841,34 @@ public record McpSdkServerConfig
 
 #endregion
 
+#region System Prompt Config
+
+/// <summary>
+/// Configuration for using Claude Code's preset system prompt with optional additions.
+/// </summary>
+public record SystemPromptPreset
+{
+    /// <summary>Type identifier. Always "preset" for preset system prompts.</summary>
+    [JsonPropertyName("type")]
+    public string Type => "preset";
+
+    /// <summary>The preset to use. Currently only "claude_code" is supported.</summary>
+    [JsonPropertyName("preset")]
+    public required string Preset { get; init; }
+
+    /// <summary>Additional instructions to append to the preset system prompt.</summary>
+    [JsonPropertyName("append")]
+    public string? Append { get; init; }
+
+    /// <summary>
+    /// Creates a Claude Code preset system prompt with the specified append text.
+    /// </summary>
+    public static SystemPromptPreset ClaudeCode(string? append = null) =>
+        new() { Preset = "claude_code", Append = append };
+}
+
+#endregion
+
 #region Agent and Sandbox Config
 
 /// <summary>
@@ -976,8 +1004,8 @@ public class ClaudeAgentOptions
     /// <summary>Additional tools to allow.</summary>
     public IReadOnlyList<string> AllowedTools { get; init; } = [];
 
-    /// <summary>System prompt for the conversation.</summary>
-    public string? SystemPrompt { get; init; }
+    /// <summary>System prompt for the conversation. Can be a string or <see cref="SystemPromptPreset"/>.</summary>
+    public object? SystemPrompt { get; init; }
 
     /// <summary>MCP server configurations (dict or path). Use <c>McpServers</c> helpers for in-process SDK servers.</summary>
     public object? McpServers { get; init; }
