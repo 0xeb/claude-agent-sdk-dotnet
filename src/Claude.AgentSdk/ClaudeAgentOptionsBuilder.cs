@@ -52,6 +52,8 @@ public sealed class ClaudeAgentOptionsBuilder
     private SandboxSettings? _sandbox;
     private readonly List<SdkPluginConfig> _plugins = [];
     private int? _maxThinkingTokens;
+    private IThinkingConfig? _thinking;
+    private EffortLevel? _effort;
     private JsonElement? _outputFormat;
     private bool _enableFileCheckpointing;
 
@@ -260,9 +262,46 @@ public sealed class ClaudeAgentOptionsBuilder
     }
 
     /// <summary>Set maximum thinking tokens.</summary>
+    /// <remarks>Deprecated: Use <see cref="Thinking(IThinkingConfig)"/> instead.</remarks>
+    [Obsolete("Use Thinking() instead.")]
     public ClaudeAgentOptionsBuilder MaxThinkingTokens(int tokens)
     {
         _maxThinkingTokens = tokens;
+        return this;
+    }
+
+    /// <summary>Set the thinking configuration.</summary>
+    public ClaudeAgentOptionsBuilder Thinking(IThinkingConfig config)
+    {
+        _thinking = config;
+        return this;
+    }
+
+    /// <summary>Set thinking to adaptive mode.</summary>
+    public ClaudeAgentOptionsBuilder ThinkingAdaptive()
+    {
+        _thinking = new ThinkingConfigAdaptive();
+        return this;
+    }
+
+    /// <summary>Set thinking to enabled mode with a specific budget.</summary>
+    public ClaudeAgentOptionsBuilder ThinkingEnabled(int budgetTokens)
+    {
+        _thinking = new ThinkingConfigEnabled(budgetTokens);
+        return this;
+    }
+
+    /// <summary>Disable thinking.</summary>
+    public ClaudeAgentOptionsBuilder ThinkingDisabled()
+    {
+        _thinking = new ThinkingConfigDisabled();
+        return this;
+    }
+
+    /// <summary>Set the effort level for thinking depth.</summary>
+    public ClaudeAgentOptionsBuilder Effort(EffortLevel effort)
+    {
+        _effort = effort;
         return this;
     }
 
@@ -338,6 +377,7 @@ public sealed class ClaudeAgentOptionsBuilder
     }
 
     /// <summary>Build the <see cref="ClaudeAgentOptions"/> instance.</summary>
+#pragma warning disable CS0618 // MaxThinkingTokens is obsolete but we still need to wire it through
     public ClaudeAgentOptions Build()
     {
         return new ClaudeAgentOptions
@@ -374,8 +414,11 @@ public sealed class ClaudeAgentOptionsBuilder
             Sandbox = _sandbox,
             Plugins = _plugins.Count > 0 ? _plugins : [],
             MaxThinkingTokens = _maxThinkingTokens,
+            Thinking = _thinking,
+            Effort = _effort,
             OutputFormat = _outputFormat,
             EnableFileCheckpointing = _enableFileCheckpointing
         };
     }
+#pragma warning restore CS0618
 }

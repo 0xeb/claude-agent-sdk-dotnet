@@ -369,6 +369,10 @@ internal class QueryHandler : IAsyncDisposable
             result["reason"] = output.Reason;
         if (output.HookSpecificOutput.HasValue)
             result["hookSpecificOutput"] = JsonSerializer.Deserialize<object>(output.HookSpecificOutput.Value.GetRawText());
+        if (output.Async.HasValue)
+            result["async"] = output.Async.Value;
+        if (output.AsyncTimeout.HasValue)
+            result["asyncTimeout"] = output.AsyncTimeout.Value;
 
         return result;
     }
@@ -529,6 +533,18 @@ internal class QueryHandler : IAsyncDisposable
     {
         await SendControlRequestAsync(
             new { subtype = "rewind_files", user_message_id = userMessageId },
+            TimeSpan.FromSeconds(60),
+            cancellationToken
+        );
+    }
+
+    /// <summary>
+    /// Get the current MCP server status.
+    /// </summary>
+    public async Task<JsonElement> GetMcpStatusAsync(CancellationToken cancellationToken = default)
+    {
+        return await SendControlRequestAsync(
+            new { subtype = "mcp_status" },
             TimeSpan.FromSeconds(60),
             cancellationToken
         );

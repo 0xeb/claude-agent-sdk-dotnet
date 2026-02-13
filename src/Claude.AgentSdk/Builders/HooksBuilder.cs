@@ -71,6 +71,41 @@ public sealed class HooksBuilder
         return this;
     }
 
+    /// <summary>Add a PostToolUseFailure hook.</summary>
+    public HooksBuilder PostToolUseFailure(string matcher, HookCallback callback, double? timeout = null)
+    {
+        AddHook(HookEvent.PostToolUseFailure, matcher, callback, timeout);
+        return this;
+    }
+
+    /// <summary>Add a PostToolUseFailure hook with multiple callbacks.</summary>
+    public HooksBuilder PostToolUseFailure(string matcher, params HookCallback[] callbacks)
+    {
+        AddHook(HookEvent.PostToolUseFailure, matcher, callbacks);
+        return this;
+    }
+
+    /// <summary>Add a Notification hook.</summary>
+    public HooksBuilder OnNotification(HookCallback callback, double? timeout = null)
+    {
+        AddHook(HookEvent.Notification, null, callback, timeout);
+        return this;
+    }
+
+    /// <summary>Add a SubagentStart hook.</summary>
+    public HooksBuilder OnSubagentStart(HookCallback callback, double? timeout = null)
+    {
+        AddHook(HookEvent.SubagentStart, null, callback, timeout);
+        return this;
+    }
+
+    /// <summary>Add a PermissionRequest hook.</summary>
+    public HooksBuilder OnPermissionRequest(string matcher, HookCallback callback, double? timeout = null)
+    {
+        AddHook(HookEvent.PermissionRequest, matcher, callback, timeout);
+        return this;
+    }
+
     /// <summary>Add a hook for any event.</summary>
     public HooksBuilder On(HookEvent hookEvent, string? matcher, HookCallback callback, double? timeout = null)
     {

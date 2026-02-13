@@ -115,4 +115,109 @@ public sealed class HooksBuilderTests
 
         Assert.True(options.Hooks!.ContainsKey(HookEvent.PreCompact));
     }
+
+    #region New Hook Event Builder Tests
+
+    [Fact]
+    public void PostToolUseFailure_RegistersHook()
+    {
+        var options = Claude.Options()
+            .Hooks(h => h.PostToolUseFailure("Bash", DummyCallback))
+            .Build();
+
+        Assert.NotNull(options.Hooks);
+        Assert.True(options.Hooks.ContainsKey(HookEvent.PostToolUseFailure));
+        Assert.Single(options.Hooks[HookEvent.PostToolUseFailure]);
+        Assert.Equal("Bash", options.Hooks[HookEvent.PostToolUseFailure][0].Matcher);
+    }
+
+    [Fact]
+    public void PostToolUseFailure_WithMultipleCallbacks_RegistersAll()
+    {
+        var options = Claude.Options()
+            .Hooks(h => h.PostToolUseFailure("Bash", DummyCallback, DummyCallback))
+            .Build();
+
+        Assert.Equal(2, options.Hooks![HookEvent.PostToolUseFailure][0].Hooks!.Count);
+    }
+
+    [Fact]
+    public void PostToolUseFailure_WithTimeout_SetsTimeout()
+    {
+        var options = Claude.Options()
+            .Hooks(h => h.PostToolUseFailure("Bash", DummyCallback, timeout: 3000))
+            .Build();
+
+        Assert.Equal(3000, options.Hooks![HookEvent.PostToolUseFailure][0].Timeout);
+    }
+
+    [Fact]
+    public void OnNotification_RegistersHook()
+    {
+        var options = Claude.Options()
+            .Hooks(h => h.OnNotification(DummyCallback))
+            .Build();
+
+        Assert.NotNull(options.Hooks);
+        Assert.True(options.Hooks.ContainsKey(HookEvent.Notification));
+        Assert.Single(options.Hooks[HookEvent.Notification]);
+        Assert.Null(options.Hooks[HookEvent.Notification][0].Matcher);
+    }
+
+    [Fact]
+    public void OnNotification_WithTimeout_SetsTimeout()
+    {
+        var options = Claude.Options()
+            .Hooks(h => h.OnNotification(DummyCallback, timeout: 2000))
+            .Build();
+
+        Assert.Equal(2000, options.Hooks![HookEvent.Notification][0].Timeout);
+    }
+
+    [Fact]
+    public void OnSubagentStart_RegistersHook()
+    {
+        var options = Claude.Options()
+            .Hooks(h => h.OnSubagentStart(DummyCallback))
+            .Build();
+
+        Assert.NotNull(options.Hooks);
+        Assert.True(options.Hooks.ContainsKey(HookEvent.SubagentStart));
+        Assert.Single(options.Hooks[HookEvent.SubagentStart]);
+    }
+
+    [Fact]
+    public void OnPermissionRequest_RegistersHook()
+    {
+        var options = Claude.Options()
+            .Hooks(h => h.OnPermissionRequest("Bash", DummyCallback))
+            .Build();
+
+        Assert.NotNull(options.Hooks);
+        Assert.True(options.Hooks.ContainsKey(HookEvent.PermissionRequest));
+        Assert.Equal("Bash", options.Hooks[HookEvent.PermissionRequest][0].Matcher);
+    }
+
+    [Fact]
+    public void AllHookTypes_CanBeRegisteredTogether()
+    {
+        var options = Claude.Options()
+            .Hooks(h => h
+                .PreToolUse("Bash", DummyCallback)
+                .PostToolUse("*", DummyCallback)
+                .PostToolUseFailure("Bash", DummyCallback)
+                .UserPromptSubmit(DummyCallback)
+                .OnStop(DummyCallback)
+                .OnSubagentStop(DummyCallback)
+                .PreCompact(DummyCallback)
+                .OnNotification(DummyCallback)
+                .OnSubagentStart(DummyCallback)
+                .OnPermissionRequest("*", DummyCallback))
+            .Build();
+
+        Assert.NotNull(options.Hooks);
+        Assert.Equal(10, options.Hooks.Count);
+    }
+
+    #endregion
 }
