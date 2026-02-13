@@ -200,4 +200,86 @@ public sealed class ClaudeAgentOptionsBuilderTests
         Assert.Equal(AgentSdk.PermissionMode.AcceptEdits, options.PermissionMode);
         Assert.Equal("true", options.Env["DEBUG"]);
     }
+
+    #region Thinking/Effort Builder Tests
+
+    [Fact]
+    public void ThinkingAdaptive_SetsConfig()
+    {
+        var options = Claude.Options()
+            .ThinkingAdaptive()
+            .Build();
+
+        Assert.IsType<ThinkingConfigAdaptive>(options.Thinking);
+        Assert.Equal("adaptive", options.Thinking!.Type);
+    }
+
+    [Fact]
+    public void ThinkingEnabled_SetsConfigWithBudget()
+    {
+        var options = Claude.Options()
+            .ThinkingEnabled(16000)
+            .Build();
+
+        var config = Assert.IsType<ThinkingConfigEnabled>(options.Thinking);
+        Assert.Equal(16000, config.BudgetTokens);
+    }
+
+    [Fact]
+    public void ThinkingDisabled_SetsConfig()
+    {
+        var options = Claude.Options()
+            .ThinkingDisabled()
+            .Build();
+
+        Assert.IsType<ThinkingConfigDisabled>(options.Thinking);
+        Assert.Equal("disabled", options.Thinking!.Type);
+    }
+
+    [Fact]
+    public void Thinking_WithCustomConfig_SetsConfig()
+    {
+        IThinkingConfig config = new ThinkingConfigEnabled(8000);
+        var options = Claude.Options()
+            .Thinking(config)
+            .Build();
+
+        Assert.Same(config, options.Thinking);
+    }
+
+    [Fact]
+    public void Effort_SetsValue()
+    {
+        var options = Claude.Options()
+            .Effort(EffortLevel.High)
+            .Build();
+
+        Assert.Equal(EffortLevel.High, options.Effort);
+    }
+
+    [Fact]
+    public void ThinkingAndEffort_CanBeCombined()
+    {
+        var options = Claude.Options()
+            .ThinkingAdaptive()
+            .Effort(EffortLevel.Max)
+            .Build();
+
+        Assert.IsType<ThinkingConfigAdaptive>(options.Thinking);
+        Assert.Equal(EffortLevel.Max, options.Effort);
+    }
+
+    [Fact]
+    public void Thinking_ChainsCorrectly()
+    {
+        var builder = Claude.Options();
+
+        var result = builder
+            .ThinkingAdaptive()
+            .Effort(EffortLevel.Medium);
+
+        Assert.Same(builder, result);
+    }
+
+    #endregion
 }

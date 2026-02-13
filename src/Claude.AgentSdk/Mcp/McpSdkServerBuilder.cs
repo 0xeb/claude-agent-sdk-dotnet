@@ -33,7 +33,7 @@ public sealed class McpSdkServerBuilder
     /// <item><description><c>(TArgs args) => TResult</c> (single complex param binds from the whole JSON args object)</description></item>
     /// </list>
     /// </remarks>
-    public McpSdkServerBuilder Tool(string name, Delegate handler, string? description = null)
+    public McpSdkServerBuilder Tool(string name, Delegate handler, string? description = null, McpToolAnnotations? annotations = null)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Tool name must be non-empty.", nameof(name));
@@ -41,7 +41,7 @@ public sealed class McpSdkServerBuilder
         if (_tools.ContainsKey(name))
             throw new ArgumentException($"Tool '{name}' is already registered.", nameof(name));
 
-        _tools[name] = ToolRegistration.Create(name, description, handler);
+        _tools[name] = ToolRegistration.Create(name, description, handler, annotations);
         return this;
     }
 
@@ -89,7 +89,7 @@ public sealed class McpSdkServerBuilder
 
         public McpToolDefinition Definition { get; }
 
-        private ToolRegistration(string name, string? description, JsonElement inputSchema, Delegate handler, BindingPlan bindingPlan)
+        private ToolRegistration(string name, string? description, JsonElement inputSchema, Delegate handler, BindingPlan bindingPlan, McpToolAnnotations? annotations)
         {
             _handler = handler;
             _bindingPlan = bindingPlan;
@@ -97,15 +97,16 @@ public sealed class McpSdkServerBuilder
             {
                 Name = name,
                 Description = description,
-                InputSchema = inputSchema
+                InputSchema = inputSchema,
+                Annotations = annotations
             };
         }
 
-        public static ToolRegistration Create(string name, string? description, Delegate handler)
+        public static ToolRegistration Create(string name, string? description, Delegate handler, McpToolAnnotations? annotations = null)
         {
             var plan = BindingPlan.Create(handler.Method);
             var schema = plan.BuildInputSchema();
-            return new ToolRegistration(name, description, schema, handler, plan);
+            return new ToolRegistration(name, description, schema, handler, plan, annotations);
         }
 
         public async Task<McpToolResult> InvokeAsync(JsonElement args, CancellationToken ct)

@@ -307,8 +307,26 @@ public class SubprocessTransport : ITransport
                 cmd.AddRange([$"--{flag}", value]);
         }
 
-        if (_options.MaxThinkingTokens.HasValue)
-            cmd.AddRange(["--max-thinking-tokens", _options.MaxThinkingTokens.Value.ToString()]);
+        // Resolve thinking config → --max-thinking-tokens
+        // `Thinking` takes precedence over the deprecated `MaxThinkingTokens`
+#pragma warning disable CS0618 // MaxThinkingTokens is obsolete
+        int? resolvedMaxThinkingTokens = _options.MaxThinkingTokens;
+#pragma warning restore CS0618
+        if (_options.Thinking is not null)
+        {
+            resolvedMaxThinkingTokens = _options.Thinking switch
+            {
+                ThinkingConfigAdaptive => resolvedMaxThinkingTokens ?? 32_000,
+                ThinkingConfigEnabled e => e.BudgetTokens,
+                ThinkingConfigDisabled => 0,
+                _ => resolvedMaxThinkingTokens
+            };
+        }
+        if (resolvedMaxThinkingTokens.HasValue)
+            cmd.AddRange(["--max-thinking-tokens", resolvedMaxThinkingTokens.Value.ToString()]);
+
+        if (_options.Effort.HasValue)
+            cmd.AddRange(["--effort", _options.Effort.Value.ToJsonString()]);
 
         if (_options.OutputFormat.HasValue &&
             _options.OutputFormat.Value.TryGetProperty("type", out var typeElement) &&

@@ -26,10 +26,25 @@ public enum HookEvent
 {
     PreToolUse,
     PostToolUse,
+    PostToolUseFailure,
     UserPromptSubmit,
     Stop,
     SubagentStop,
-    PreCompact
+    PreCompact,
+    Notification,
+    SubagentStart,
+    PermissionRequest
+}
+
+/// <summary>
+/// Effort level for thinking depth.
+/// </summary>
+public enum EffortLevel
+{
+    Low,
+    Medium,
+    High,
+    Max
 }
 
 /// <summary>
@@ -137,6 +152,30 @@ internal static class EnumHelpers
         PermissionUpdateType.AddDirectories => "addDirectories",
         PermissionUpdateType.RemoveDirectories => "removeDirectories",
         _ => type.ToString()
+    };
+
+    public static string ToJsonString(this EffortLevel effort) => effort switch
+    {
+        EffortLevel.Low => "low",
+        EffortLevel.Medium => "medium",
+        EffortLevel.High => "high",
+        EffortLevel.Max => "max",
+        _ => effort.ToString().ToLowerInvariant()
+    };
+
+    public static string ToJsonString(this HookEvent hookEvent) => hookEvent switch
+    {
+        HookEvent.PreToolUse => "PreToolUse",
+        HookEvent.PostToolUse => "PostToolUse",
+        HookEvent.PostToolUseFailure => "PostToolUseFailure",
+        HookEvent.UserPromptSubmit => "UserPromptSubmit",
+        HookEvent.Stop => "Stop",
+        HookEvent.SubagentStop => "SubagentStop",
+        HookEvent.PreCompact => "PreCompact",
+        HookEvent.Notification => "Notification",
+        HookEvent.SubagentStart => "SubagentStart",
+        HookEvent.PermissionRequest => "PermissionRequest",
+        _ => hookEvent.ToString()
     };
 }
 
@@ -475,6 +514,9 @@ public record PreToolUseHookInput : BaseHookInput
 
     [JsonPropertyName("tool_input")]
     public required JsonElement ToolInput { get; init; }
+
+    [JsonPropertyName("tool_use_id")]
+    public required string ToolUseId { get; init; }
 }
 
 /// <summary>
@@ -493,6 +535,33 @@ public record PostToolUseHookInput : BaseHookInput
 
     [JsonPropertyName("tool_response")]
     public required JsonElement ToolResponse { get; init; }
+
+    [JsonPropertyName("tool_use_id")]
+    public required string ToolUseId { get; init; }
+}
+
+/// <summary>
+/// Input data for PostToolUseFailure hook events.
+/// </summary>
+public record PostToolUseFailureHookInput : BaseHookInput
+{
+    [JsonPropertyName("hook_event_name")]
+    public string HookEventName => "PostToolUseFailure";
+
+    [JsonPropertyName("tool_name")]
+    public required string ToolName { get; init; }
+
+    [JsonPropertyName("tool_input")]
+    public required JsonElement ToolInput { get; init; }
+
+    [JsonPropertyName("tool_use_id")]
+    public required string ToolUseId { get; init; }
+
+    [JsonPropertyName("error")]
+    public required string Error { get; init; }
+
+    [JsonPropertyName("is_interrupt")]
+    public bool? IsInterrupt { get; init; }
 }
 
 /// <summary>
@@ -529,6 +598,15 @@ public record SubagentStopHookInput : BaseHookInput
 
     [JsonPropertyName("stop_hook_active")]
     public required bool StopHookActive { get; init; }
+
+    [JsonPropertyName("agent_id")]
+    public required string AgentId { get; init; }
+
+    [JsonPropertyName("agent_transcript_path")]
+    public required string AgentTranscriptPath { get; init; }
+
+    [JsonPropertyName("agent_type")]
+    public required string AgentType { get; init; }
 }
 
 /// <summary>
@@ -544,6 +622,57 @@ public record PreCompactHookInput : BaseHookInput
 
     [JsonPropertyName("custom_instructions")]
     public string? CustomInstructions { get; init; }
+}
+
+/// <summary>
+/// Input data for Notification hook events.
+/// </summary>
+public record NotificationHookInput : BaseHookInput
+{
+    [JsonPropertyName("hook_event_name")]
+    public string HookEventName => "Notification";
+
+    [JsonPropertyName("message")]
+    public required string Message { get; init; }
+
+    [JsonPropertyName("title")]
+    public string? Title { get; init; }
+
+    [JsonPropertyName("notification_type")]
+    public required string NotificationType { get; init; }
+}
+
+/// <summary>
+/// Input data for SubagentStart hook events.
+/// </summary>
+public record SubagentStartHookInput : BaseHookInput
+{
+    [JsonPropertyName("hook_event_name")]
+    public string HookEventName => "SubagentStart";
+
+    [JsonPropertyName("agent_id")]
+    public required string AgentId { get; init; }
+
+    [JsonPropertyName("agent_type")]
+    public required string AgentType { get; init; }
+}
+
+/// <summary>
+/// Input data for PermissionRequest hook events.
+/// </summary>
+public record PermissionRequestHookInput : BaseHookInput
+{
+    [JsonPropertyName("hook_event_name")]
+    public string HookEventName => "PermissionRequest";
+
+    [JsonPropertyName("tool_name")]
+    public required string ToolName { get; init; }
+
+    [JsonPropertyName("tool_input")]
+    public required JsonElement ToolInput { get; init; }
+
+    [JsonPropertyName("permission_suggestions")]
+    public JsonElement? PermissionSuggestions { get; init; }
 }
 
 /// <summary>
@@ -571,6 +700,18 @@ public record HookOutput
 
     [JsonPropertyName("hookSpecificOutput")]
     public JsonElement? HookSpecificOutput { get; init; }
+
+    /// <summary>
+    /// Set to true to defer hook execution (async mode).
+    /// </summary>
+    [JsonPropertyName("async")]
+    public bool? Async { get; init; }
+
+    /// <summary>
+    /// Timeout in milliseconds for async hook operations.
+    /// </summary>
+    [JsonPropertyName("asyncTimeout")]
+    public int? AsyncTimeout { get; init; }
 }
 
 /// <summary>
@@ -782,6 +923,46 @@ public record SandboxSettings
 
 #endregion
 
+#region ThinkingConfig
+
+/// <summary>
+/// Base interface for thinking configuration.
+/// </summary>
+public interface IThinkingConfig
+{
+    /// <summary>The thinking configuration type.</summary>
+    string Type { get; }
+}
+
+/// <summary>
+/// Adaptive thinking configuration — lets the model decide how much to think.
+/// </summary>
+public record ThinkingConfigAdaptive : IThinkingConfig
+{
+    /// <inheritdoc />
+    public string Type => "adaptive";
+}
+
+/// <summary>
+/// Enabled thinking configuration with a specific budget.
+/// </summary>
+public record ThinkingConfigEnabled(int BudgetTokens) : IThinkingConfig
+{
+    /// <inheritdoc />
+    public string Type => "enabled";
+}
+
+/// <summary>
+/// Disabled thinking configuration.
+/// </summary>
+public record ThinkingConfigDisabled : IThinkingConfig
+{
+    /// <inheritdoc />
+    public string Type => "disabled";
+}
+
+#endregion
+
 #region Claude Agent Options
 
 /// <summary>
@@ -883,7 +1064,19 @@ public class ClaudeAgentOptions
     public IReadOnlyList<SdkPluginConfig> Plugins { get; init; } = [];
 
     /// <summary>Maximum thinking tokens.</summary>
+    /// <remarks>Deprecated: Use <see cref="Thinking"/> instead.</remarks>
+    [Obsolete("Use Thinking instead.")]
     public int? MaxThinkingTokens { get; init; }
+
+    /// <summary>
+    /// Controls extended thinking behavior. Takes precedence over MaxThinkingTokens.
+    /// </summary>
+    public IThinkingConfig? Thinking { get; init; }
+
+    /// <summary>
+    /// Effort level for thinking depth.
+    /// </summary>
+    public EffortLevel? Effort { get; init; }
 
     /// <summary>Output format for structured outputs.</summary>
     public JsonElement? OutputFormat { get; init; }

@@ -60,6 +60,32 @@ public class McpServerHandlers
 }
 
 /// <summary>
+/// Annotations for an MCP tool describing its behavior hints.
+/// </summary>
+public class McpToolAnnotations
+{
+    /// <summary>Human-readable title for the tool.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("title")]
+    public string? Title { get; init; }
+
+    /// <summary>If true, the tool does not modify state.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("readOnlyHint")]
+    public bool? ReadOnlyHint { get; init; }
+
+    /// <summary>If true, the tool may perform destructive operations.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("destructiveHint")]
+    public bool? DestructiveHint { get; init; }
+
+    /// <summary>If true, repeated calls with same args have no additional effect.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("idempotentHint")]
+    public bool? IdempotentHint { get; init; }
+
+    /// <summary>If true, the tool interacts with entities beyond its host environment.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("openWorldHint")]
+    public bool? OpenWorldHint { get; init; }
+}
+
+/// <summary>
 /// Definition of an MCP tool.
 /// </summary>
 public class McpToolDefinition
@@ -75,6 +101,10 @@ public class McpToolDefinition
     /// <summary>JSON Schema for the tool's input parameters.</summary>
     [System.Text.Json.Serialization.JsonPropertyName("inputSchema")]
     public JsonElement? InputSchema { get; init; }
+
+    /// <summary>Tool behavior annotations/hints.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("annotations")]
+    public McpToolAnnotations? Annotations { get; init; }
 }
 
 /// <summary>

@@ -93,4 +93,144 @@ public class TypesTests
         Assert.Equal("Not allowed", result.Message);
         Assert.True(result.Interrupt);
     }
+
+    #region ThinkingConfig Tests
+
+    [Fact]
+    public void ThinkingConfigAdaptive_HasCorrectType()
+    {
+        IThinkingConfig config = new ThinkingConfigAdaptive();
+        Assert.Equal("adaptive", config.Type);
+    }
+
+    [Fact]
+    public void ThinkingConfigEnabled_HasCorrectTypeAndBudget()
+    {
+        var config = new ThinkingConfigEnabled(16000);
+        Assert.Equal("enabled", config.Type);
+        Assert.Equal(16000, config.BudgetTokens);
+    }
+
+    [Fact]
+    public void ThinkingConfigDisabled_HasCorrectType()
+    {
+        IThinkingConfig config = new ThinkingConfigDisabled();
+        Assert.Equal("disabled", config.Type);
+    }
+
+    #endregion
+
+    #region EffortLevel Tests
+
+    [Theory]
+    [InlineData(EffortLevel.Low, "low")]
+    [InlineData(EffortLevel.Medium, "medium")]
+    [InlineData(EffortLevel.High, "high")]
+    [InlineData(EffortLevel.Max, "max")]
+    public void EffortLevel_ToJsonString_ReturnsCorrectValue(EffortLevel effort, string expected)
+    {
+        Assert.Equal(expected, effort.ToJsonString());
+    }
+
+    #endregion
+
+    #region New HookEvent Tests
+
+    [Fact]
+    public void HookEvent_HasAllExpectedValues()
+    {
+        var values = Enum.GetValues<HookEvent>();
+        Assert.Equal(10, values.Length);
+
+        Assert.Contains(HookEvent.PostToolUseFailure, values);
+        Assert.Contains(HookEvent.Notification, values);
+        Assert.Contains(HookEvent.SubagentStart, values);
+        Assert.Contains(HookEvent.PermissionRequest, values);
+    }
+
+    [Theory]
+    [InlineData(HookEvent.PostToolUseFailure, "PostToolUseFailure")]
+    [InlineData(HookEvent.Notification, "Notification")]
+    [InlineData(HookEvent.SubagentStart, "SubagentStart")]
+    [InlineData(HookEvent.PermissionRequest, "PermissionRequest")]
+    public void HookEvent_ToJsonString_ReturnsCorrectValue(HookEvent hookEvent, string expected)
+    {
+        Assert.Equal(expected, hookEvent.ToJsonString());
+    }
+
+    #endregion
+
+    #region HookOutput Async Fields
+
+    [Fact]
+    public void HookOutput_AsyncFields_DefaultToNull()
+    {
+        var output = new HookOutput();
+        Assert.Null(output.Async);
+        Assert.Null(output.AsyncTimeout);
+    }
+
+    [Fact]
+    public void HookOutput_AsyncFields_CanBeSet()
+    {
+        var output = new HookOutput
+        {
+            Async = true,
+            AsyncTimeout = 5000
+        };
+
+        Assert.True(output.Async);
+        Assert.Equal(5000, output.AsyncTimeout);
+    }
+
+    [Fact]
+    public void HookOutput_AsyncFields_SerializeCorrectly()
+    {
+        var output = new HookOutput
+        {
+            Async = true,
+            AsyncTimeout = 3000
+        };
+
+        var json = JsonSerializer.Serialize(output);
+        Assert.Contains("\"async\":true", json);
+        Assert.Contains("\"asyncTimeout\":3000", json);
+    }
+
+    #endregion
+
+    #region ClaudeAgentOptions Thinking/Effort Tests
+
+#pragma warning disable CS0618 // Testing obsolete MaxThinkingTokens
+    [Fact]
+    public void ClaudeAgentOptions_ThinkingAndEffort_DefaultToNull()
+    {
+        var options = new ClaudeAgentOptions();
+        Assert.Null(options.Thinking);
+        Assert.Null(options.Effort);
+        Assert.Null(options.MaxThinkingTokens);
+    }
+
+    [Fact]
+    public void ClaudeAgentOptions_CanSetThinkingConfig()
+    {
+        var options = new ClaudeAgentOptions
+        {
+            Thinking = new ThinkingConfigAdaptive()
+        };
+        Assert.IsType<ThinkingConfigAdaptive>(options.Thinking);
+    }
+
+    [Fact]
+    public void ClaudeAgentOptions_CanSetEffort()
+    {
+        var options = new ClaudeAgentOptions
+        {
+            Effort = EffortLevel.High
+        };
+        Assert.Equal(EffortLevel.High, options.Effort);
+    }
+#pragma warning restore CS0618
+
+    #endregion
 }

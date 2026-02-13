@@ -175,11 +175,15 @@ public class ClaudeSDKClient : IAsyncDisposable
                     ForkSession = _options.ForkSession,
                     Agents = _options.Agents,
                     SettingSources = _options.SettingSources,
+#pragma warning disable CS0618 // MaxThinkingTokens is obsolete
                     Sandbox = _options.Sandbox,
                     Plugins = _options.Plugins,
                     MaxThinkingTokens = _options.MaxThinkingTokens,
+                    Thinking = _options.Thinking,
+                    Effort = _options.Effort,
                     OutputFormat = _options.OutputFormat,
                     EnableFileCheckpointing = _options.EnableFileCheckpointing
+#pragma warning restore CS0618
                 }
                 : _options
         );
@@ -362,6 +366,19 @@ public class ClaudeSDKClient : IAsyncDisposable
             throw new CliConnectionException("Not connected. Call ConnectAsync() first.");
 
         await _queryHandler.RewindFilesAsync(userMessageId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Get the current MCP server status.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The MCP status as a JSON element.</returns>
+    public async Task<JsonElement> GetMcpStatusAsync(CancellationToken cancellationToken = default)
+    {
+        if (_queryHandler == null)
+            throw new CliConnectionException("Not connected. Call ConnectAsync() first.");
+
+        return await _queryHandler.GetMcpStatusAsync(cancellationToken);
     }
 
     /// <summary>
