@@ -195,7 +195,7 @@ public class SubprocessTransport : ITransport
         return JsonSerializer.Serialize(settingsObj);
     }
 
-    private List<string> BuildCommand()
+    internal List<string> BuildCommand()
     {
         var cmd = new List<string> { _cliPath, "--output-format", "stream-json", "--verbose" };
 
