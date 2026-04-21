@@ -206,7 +206,7 @@ public class SubprocessTransport : ITransport
         }
         else if (_options.SystemPrompt is SystemPromptPreset preset)
         {
-            if (!string.IsNullOrEmpty(preset.Append))
+            if (preset.Append is not null)
             {
                 cmd.AddRange(["--append-system-prompt", preset.Append]);
             }
