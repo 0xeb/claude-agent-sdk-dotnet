@@ -382,6 +382,59 @@ public class ClaudeSDKClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Get a typed MCP server status. Python commit 28f9b4b.
+    /// </summary>
+    public async Task<McpStatusResponse> ListMcpServersAsync(CancellationToken cancellationToken = default)
+    {
+        var raw = await GetMcpStatusAsync(cancellationToken);
+        return JsonSerializer.Deserialize<McpStatusResponse>(raw.GetRawText())
+            ?? new McpStatusResponse { McpServers = Array.Empty<McpServerStatus>() };
+    }
+
+    /// <summary>
+    /// Reconnect a disconnected or failed MCP server. Python commit 28f9b4b.
+    /// </summary>
+    public async Task ReconnectMcpServerAsync(string serverName, CancellationToken cancellationToken = default)
+    {
+        if (_queryHandler == null)
+            throw new CliConnectionException("Not connected. Call ConnectAsync() first.");
+        await _queryHandler.ReconnectMcpServerAsync(serverName, cancellationToken);
+    }
+
+    /// <summary>
+    /// Enable or disable an MCP server. Python commit 28f9b4b.
+    /// </summary>
+    public async Task ToggleMcpServerAsync(string serverName, bool enabled, CancellationToken cancellationToken = default)
+    {
+        if (_queryHandler == null)
+            throw new CliConnectionException("Not connected. Call ConnectAsync() first.");
+        await _queryHandler.ToggleMcpServerAsync(serverName, enabled, cancellationToken);
+    }
+
+    /// <summary>
+    /// Stop a running task by its task ID (from task_notification events).
+    /// Python commit 28f9b4b.
+    /// </summary>
+    public async Task StopTaskAsync(string taskId, CancellationToken cancellationToken = default)
+    {
+        if (_queryHandler == null)
+            throw new CliConnectionException("Not connected. Call ConnectAsync() first.");
+        await _queryHandler.StopTaskAsync(taskId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Get a breakdown of current context window usage. Python commit ac900bd.
+    /// </summary>
+    public async Task<ContextUsageResponse> GetContextUsageAsync(CancellationToken cancellationToken = default)
+    {
+        if (_queryHandler == null)
+            throw new CliConnectionException("Not connected. Call ConnectAsync() first.");
+        var raw = await _queryHandler.GetContextUsageAsync(cancellationToken);
+        return JsonSerializer.Deserialize<ContextUsageResponse>(raw.GetRawText())
+            ?? throw new ClaudeSDKException("Empty context usage response");
+    }
+
+    /// <summary>
     /// Get server initialization info including available commands and output styles.
     /// </summary>
     /// <returns>Dictionary with server info, or null if not in streaming mode.</returns>

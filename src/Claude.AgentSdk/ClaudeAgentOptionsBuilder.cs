@@ -56,6 +56,14 @@ public sealed class ClaudeAgentOptionsBuilder
     private EffortLevel? _effort;
     private JsonElement? _outputFormat;
     private bool _enableFileCheckpointing;
+    private string? _sessionId;
+    private TaskBudget? _taskBudget;
+    private object? _skills;
+    private bool _strictMcpConfig;
+    private bool _includeHookEvents;
+    private ISessionStore? _sessionStore;
+    private SessionStoreFlushMode _sessionStoreFlush = SessionStoreFlushMode.Batched;
+    private object? _toolsConfig;
 
     /// <summary>Set the system prompt.</summary>
     public ClaudeAgentOptionsBuilder SystemPrompt(string prompt)
@@ -68,6 +76,20 @@ public sealed class ClaudeAgentOptionsBuilder
     public ClaudeAgentOptionsBuilder SystemPrompt(SystemPromptPreset preset)
     {
         _systemPrompt = preset;
+        return this;
+    }
+
+    /// <summary>Load the system prompt from a file (Python commit 139b815).</summary>
+    public ClaudeAgentOptionsBuilder SystemPrompt(SystemPromptFile file)
+    {
+        _systemPrompt = file;
+        return this;
+    }
+
+    /// <summary>Load the system prompt from a file by path.</summary>
+    public ClaudeAgentOptionsBuilder SystemPromptFromFile(string path)
+    {
+        _systemPrompt = new SystemPromptFile { Path = path };
         return this;
     }
 
@@ -337,6 +359,102 @@ public sealed class ClaudeAgentOptionsBuilder
         return this;
     }
 
+    /// <summary>
+    /// Use a specific session ID (UUID) instead of an auto-generated one.
+    /// Python commit 5656d20.
+    /// </summary>
+    public ClaudeAgentOptionsBuilder SessionId(string sessionId)
+    {
+        _sessionId = sessionId;
+        return this;
+    }
+
+    /// <summary>Set the API-side task budget. Python commit 2e60cec.</summary>
+    public ClaudeAgentOptionsBuilder TaskBudget(int totalTokens)
+    {
+        _taskBudget = new TaskBudget(totalTokens);
+        return this;
+    }
+
+    /// <summary>Set the API-side task budget directly.</summary>
+    public ClaudeAgentOptionsBuilder TaskBudget(TaskBudget budget)
+    {
+        _taskBudget = budget;
+        return this;
+    }
+
+    /// <summary>Enable a specific list of skills (Python commit 1c26bd3).</summary>
+    public ClaudeAgentOptionsBuilder Skills(params string[] names)
+    {
+        _skills = names.ToList();
+        return this;
+    }
+
+    /// <summary>Enable every discovered skill (Python commit 1c26bd3).</summary>
+    public ClaudeAgentOptionsBuilder AllSkills()
+    {
+        _skills = "all";
+        return this;
+    }
+
+    /// <summary>
+    /// Restrict MCP servers to those configured here, ignoring CLI auto-loaded
+    /// servers. Maps to <c>--strict-mcp-config</c>. Python commit 32bcc4e.
+    /// </summary>
+    public ClaudeAgentOptionsBuilder StrictMcpConfig(bool value = true)
+    {
+        _strictMcpConfig = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Emit <see cref="HookEventMessage"/> entries in the message stream.
+    /// Python commit c1182a4.
+    /// </summary>
+    public ClaudeAgentOptionsBuilder IncludeHookEvents(bool value = true)
+    {
+        _includeHookEvents = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Provide an <see cref="ISessionStore"/> to mirror transcripts externally.
+    /// Phase 2B exposes the interface only; actual transport wiring lands in
+    /// Phase 3B. Python commit 6e3d54f.
+    /// </summary>
+    public ClaudeAgentOptionsBuilder SessionStore(ISessionStore store, SessionStoreFlushMode flush = SessionStoreFlushMode.Batched)
+    {
+        _sessionStore = store;
+        _sessionStoreFlush = flush;
+        return this;
+    }
+
+    /// <summary>Set the session store flush mode independently.</summary>
+    public ClaudeAgentOptionsBuilder SessionStoreFlush(SessionStoreFlushMode flush)
+    {
+        _sessionStoreFlush = flush;
+        return this;
+    }
+
+    /// <summary>
+    /// Use the Claude Code built-in tools preset. Equivalent to
+    /// <c>{"type": "preset", "preset": "claude_code"}</c> in Python.
+    /// </summary>
+    public ClaudeAgentOptionsBuilder ToolsPreset(ToolsPreset preset)
+    {
+        _toolsConfig = preset;
+        _tools = null;
+        return this;
+    }
+
+    /// <summary>Use the default Claude Code tools preset.</summary>
+    public ClaudeAgentOptionsBuilder ToolsClaudeCode()
+    {
+        _toolsConfig = AgentSdk.ToolsPreset.ClaudeCode();
+        _tools = null;
+        return this;
+    }
+
     /// <summary>Set the tool permission callback.</summary>
     public ClaudeAgentOptionsBuilder CanUseTool(CanUseToolCallback callback)
     {
@@ -435,7 +553,15 @@ public sealed class ClaudeAgentOptionsBuilder
             Thinking = _thinking,
             Effort = _effort,
             OutputFormat = _outputFormat,
-            EnableFileCheckpointing = _enableFileCheckpointing
+            EnableFileCheckpointing = _enableFileCheckpointing,
+            SessionId = _sessionId,
+            TaskBudget = _taskBudget,
+            Skills = _skills,
+            StrictMcpConfig = _strictMcpConfig,
+            IncludeHookEvents = _includeHookEvents,
+            SessionStore = _sessionStore,
+            SessionStoreFlush = _sessionStoreFlush,
+            ToolsPreset = _toolsConfig as ToolsPreset
         };
     }
 #pragma warning restore CS0618

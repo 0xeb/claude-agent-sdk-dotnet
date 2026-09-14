@@ -16,7 +16,11 @@ public enum PermissionMode
     Default,
     AcceptEdits,
     Plan,
-    BypassPermissions
+    BypassPermissions,
+    /// <summary>Don't prompt for permissions; deny if not pre-approved (Python commit e30c742).</summary>
+    DontAsk,
+    /// <summary>Automatic permission mode (Python commit 841ee87).</summary>
+    Auto
 }
 
 /// <summary>
@@ -44,6 +48,8 @@ public enum EffortLevel
     Low,
     Medium,
     High,
+    /// <summary>Extended reasoning depth (Opus 4.7 only; falls back to high on other models). Python commit 04a39ac.</summary>
+    XHigh,
     Max
 }
 
@@ -115,6 +121,8 @@ internal static class EnumHelpers
         PermissionMode.AcceptEdits => "acceptEdits",
         PermissionMode.Plan => "plan",
         PermissionMode.BypassPermissions => "bypassPermissions",
+        PermissionMode.DontAsk => "dontAsk",
+        PermissionMode.Auto => "auto",
         _ => mode.ToString().ToLowerInvariant()
     };
 
@@ -159,6 +167,7 @@ internal static class EnumHelpers
         EffortLevel.Low => "low",
         EffortLevel.Medium => "medium",
         EffortLevel.High => "high",
+        EffortLevel.XHigh => "xhigh",
         EffortLevel.Max => "max",
         _ => effort.ToString().ToLowerInvariant()
     };
@@ -191,6 +200,8 @@ internal static class EnumHelpers
 [JsonDerivedType(typeof(ThinkingBlock), "thinking")]
 [JsonDerivedType(typeof(ToolUseBlock), "tool_use")]
 [JsonDerivedType(typeof(ToolResultBlock), "tool_result")]
+[JsonDerivedType(typeof(ServerToolUseBlock), "server_tool_use")]
+[JsonDerivedType(typeof(ServerToolResultBlock), "server_tool_result")]
 public abstract record ContentBlock;
 
 /// <summary>
@@ -224,6 +235,43 @@ public record ToolResultBlock(
     [property: JsonPropertyName("tool_use_id")] string ToolUseId,
     [property: JsonPropertyName("content")] JsonElement? Content = null,
     [property: JsonPropertyName("is_error")] bool? IsError = null
+) : ContentBlock;
+
+/// <summary>
+/// Well-known server-side tool names. The wire value is a free string;
+/// these constants document the values produced by the API today.
+/// Python commit 6ab97b4.
+/// </summary>
+public static class ServerToolName
+{
+    public const string Advisor = "advisor";
+    public const string WebSearch = "web_search";
+    public const string WebFetch = "web_fetch";
+    public const string CodeExecution = "code_execution";
+    public const string BashCodeExecution = "bash_code_execution";
+    public const string TextEditorCodeExecution = "text_editor_code_execution";
+    public const string ToolSearchToolRegex = "tool_search_tool_regex";
+    public const string ToolSearchToolBm25 = "tool_search_tool_bm25";
+}
+
+/// <summary>
+/// Server-side tool use block (e.g. advisor, web_search, web_fetch).
+/// These are tools the API executes server-side on the model's behalf, so they
+/// appear in the message stream alongside regular tool_use blocks but the
+/// caller never needs to return a result. Python commit 6ab97b4.
+/// </summary>
+public record ServerToolUseBlock(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("input")] JsonElement Input
+) : ContentBlock;
+
+/// <summary>
+/// Result block returned for a server-side tool call. Python commit 6ab97b4.
+/// </summary>
+public record ServerToolResultBlock(
+    [property: JsonPropertyName("tool_use_id")] string ToolUseId,
+    [property: JsonPropertyName("content")] JsonElement Content
 ) : ContentBlock;
 
 #endregion
@@ -301,6 +349,26 @@ public record AssistantMessage : Message
 
     [JsonPropertyName("error")]
     public AssistantMessageError? Error { get; init; }
+
+    /// <summary>API usage stats for this message. Python commit fc82420.</summary>
+    [JsonPropertyName("usage")]
+    public JsonElement? Usage { get; init; }
+
+    /// <summary>Message identifier from the API. Python commit 24b9b68.</summary>
+    [JsonPropertyName("message_id")]
+    public string? MessageId { get; init; }
+
+    /// <summary>Reason the model stopped (e.g. "end_turn", "tool_use"). Python commit 24b9b68.</summary>
+    [JsonPropertyName("stop_reason")]
+    public string? StopReason { get; init; }
+
+    /// <summary>Session ID this message belongs to. Python commit 24b9b68.</summary>
+    [JsonPropertyName("session_id")]
+    public string? SessionId { get; init; }
+
+    /// <summary>Unique ID for this message. Python commit 24b9b68.</summary>
+    [JsonPropertyName("uuid")]
+    public string? Uuid { get; init; }
 }
 
 /// <summary>
@@ -349,7 +417,37 @@ public record ResultMessage : Message
 
     [JsonPropertyName("structured_output")]
     public JsonElement? StructuredOutput { get; init; }
+
+    /// <summary>Reason the run stopped, when applicable. Python commit 7219299.</summary>
+    [JsonPropertyName("stop_reason")]
+    public string? StopReason { get; init; }
+
+    /// <summary>Tool call deferred by a PreToolUse hook returning "defer". Python commit f5a1b67.</summary>
+    [JsonPropertyName("deferred_tool_use")]
+    public DeferredToolUse? DeferredToolUse { get; init; }
+
+    /// <summary>Errors collected during the run. Python commit f9fc8e0.</summary>
+    [JsonPropertyName("errors")]
+    public IReadOnlyList<string>? Errors { get; init; }
+
+    /// <summary>HTTP status code of the failing API call (e.g. 429, 500, 529). Python commit b80d244.</summary>
+    [JsonPropertyName("api_error_status")]
+    public int? ApiErrorStatus { get; init; }
+
+    /// <summary>Unique ID for this result. Python commit 24b9b68.</summary>
+    [JsonPropertyName("uuid")]
+    public string? Uuid { get; init; }
 }
+
+/// <summary>
+/// Tool use that was deferred by a PreToolUse hook returning "defer".
+/// Python commit f5a1b67.
+/// </summary>
+public record DeferredToolUse(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("input")] JsonElement Input
+);
 
 /// <summary>
 /// Stream event for partial message updates during streaming.
@@ -432,14 +530,127 @@ public record PermissionUpdate(
 
         return result;
     }
+
+    /// <summary>
+    /// Construct a PermissionUpdate from the control protocol dict format
+    /// (inverse of <see cref="ToDictionary"/>). Python commit 6597529.
+    /// </summary>
+    public static PermissionUpdate FromDictionary(IReadOnlyDictionary<string, object?> data)
+    {
+        var typeStr = data["type"]?.ToString() ?? throw new ArgumentException("'type' is required");
+        var type = typeStr switch
+        {
+            "addRules" => PermissionUpdateType.AddRules,
+            "replaceRules" => PermissionUpdateType.ReplaceRules,
+            "removeRules" => PermissionUpdateType.RemoveRules,
+            "setMode" => PermissionUpdateType.SetMode,
+            "addDirectories" => PermissionUpdateType.AddDirectories,
+            "removeDirectories" => PermissionUpdateType.RemoveDirectories,
+            _ => throw new ArgumentException($"Unknown permission update type: {typeStr}")
+        };
+
+        IReadOnlyList<PermissionRuleValue>? rules = null;
+        if (data.TryGetValue("rules", out var rawRules) && rawRules is not null)
+        {
+            var list = new List<PermissionRuleValue>();
+            switch (rawRules)
+            {
+                case IEnumerable<IDictionary<string, object?>> typedRules:
+                    foreach (var r in typedRules)
+                        list.Add(new PermissionRuleValue(
+                            r["toolName"]?.ToString() ?? string.Empty,
+                            r.TryGetValue("ruleContent", out var rc) ? rc?.ToString() : null));
+                    break;
+                case JsonElement je when je.ValueKind == JsonValueKind.Array:
+                    foreach (var item in je.EnumerateArray())
+                        list.Add(new PermissionRuleValue(
+                            item.TryGetProperty("toolName", out var tn) ? tn.GetString() ?? string.Empty : string.Empty,
+                            item.TryGetProperty("ruleContent", out var rc) && rc.ValueKind != JsonValueKind.Null ? rc.GetString() : null));
+                    break;
+                case System.Collections.IEnumerable enumerable:
+                    foreach (var item in enumerable)
+                    {
+                        if (item is IDictionary<string, object?> d)
+                            list.Add(new PermissionRuleValue(
+                                d["toolName"]?.ToString() ?? string.Empty,
+                                d.TryGetValue("ruleContent", out var rc) ? rc?.ToString() : null));
+                    }
+                    break;
+            }
+            rules = list;
+        }
+
+        PermissionBehavior? behavior = null;
+        if (data.TryGetValue("behavior", out var rawBehavior) && rawBehavior is not null)
+        {
+            behavior = rawBehavior.ToString() switch
+            {
+                "allow" => PermissionBehavior.Allow,
+                "deny" => PermissionBehavior.Deny,
+                "ask" => PermissionBehavior.Ask,
+                _ => null
+            };
+        }
+
+        PermissionMode? mode = null;
+        if (data.TryGetValue("mode", out var rawMode) && rawMode is not null)
+        {
+            mode = rawMode.ToString() switch
+            {
+                "default" => PermissionMode.Default,
+                "acceptEdits" => PermissionMode.AcceptEdits,
+                "plan" => PermissionMode.Plan,
+                "bypassPermissions" => PermissionMode.BypassPermissions,
+                "dontAsk" => PermissionMode.DontAsk,
+                "auto" => PermissionMode.Auto,
+                _ => null
+            };
+        }
+
+        IReadOnlyList<string>? directories = null;
+        if (data.TryGetValue("directories", out var rawDirs) && rawDirs is not null)
+        {
+            directories = rawDirs switch
+            {
+                IEnumerable<string> ss => ss.ToList(),
+                JsonElement je when je.ValueKind == JsonValueKind.Array =>
+                    je.EnumerateArray().Select(e => e.GetString() ?? string.Empty).ToList(),
+                System.Collections.IEnumerable e => e.Cast<object?>().Select(o => o?.ToString() ?? string.Empty).ToList(),
+                _ => null
+            };
+        }
+
+        PermissionUpdateDestination? destination = null;
+        if (data.TryGetValue("destination", out var rawDest) && rawDest is not null)
+        {
+            destination = rawDest.ToString() switch
+            {
+                "userSettings" => PermissionUpdateDestination.UserSettings,
+                "projectSettings" => PermissionUpdateDestination.ProjectSettings,
+                "localSettings" => PermissionUpdateDestination.LocalSettings,
+                "session" => PermissionUpdateDestination.Session,
+                _ => null
+            };
+        }
+
+        return new PermissionUpdate(type, rules, behavior, mode, directories, destination);
+    }
 }
 
 /// <summary>
 /// Context information for tool permission callbacks.
+/// Expanded in Python commits 3caf665 and fe0cff3.
 /// </summary>
 public record ToolPermissionContext(
     object? Signal = null,
-    IReadOnlyList<PermissionUpdate>? Suggestions = null
+    IReadOnlyList<PermissionUpdate>? Suggestions = null,
+    string? ToolUseId = null,
+    string? AgentId = null,
+    string? BlockedPath = null,
+    string? DecisionReason = null,
+    string? Title = null,
+    string? DisplayName = null,
+    string? Description = null
 );
 
 /// <summary>
@@ -517,6 +728,14 @@ public record PreToolUseHookInput : BaseHookInput
 
     [JsonPropertyName("tool_use_id")]
     public required string ToolUseId { get; init; }
+
+    /// <summary>Sub-agent identifier when this hook fires inside a Task-spawned sub-agent. Python commit 2f1fd38.</summary>
+    [JsonPropertyName("agent_id")]
+    public string? AgentId { get; init; }
+
+    /// <summary>Agent type name (e.g. "general-purpose", "code-reviewer"). Python commit 2f1fd38.</summary>
+    [JsonPropertyName("agent_type")]
+    public string? AgentType { get; init; }
 }
 
 /// <summary>
@@ -538,6 +757,14 @@ public record PostToolUseHookInput : BaseHookInput
 
     [JsonPropertyName("tool_use_id")]
     public required string ToolUseId { get; init; }
+
+    /// <summary>Sub-agent identifier. Python commit 2f1fd38.</summary>
+    [JsonPropertyName("agent_id")]
+    public string? AgentId { get; init; }
+
+    /// <summary>Agent type name. Python commit 2f1fd38.</summary>
+    [JsonPropertyName("agent_type")]
+    public string? AgentType { get; init; }
 }
 
 /// <summary>
@@ -562,6 +789,14 @@ public record PostToolUseFailureHookInput : BaseHookInput
 
     [JsonPropertyName("is_interrupt")]
     public bool? IsInterrupt { get; init; }
+
+    /// <summary>Sub-agent identifier. Python commit 2f1fd38.</summary>
+    [JsonPropertyName("agent_id")]
+    public string? AgentId { get; init; }
+
+    /// <summary>Agent type name. Python commit 2f1fd38.</summary>
+    [JsonPropertyName("agent_type")]
+    public string? AgentType { get; init; }
 }
 
 /// <summary>
@@ -673,6 +908,14 @@ public record PermissionRequestHookInput : BaseHookInput
 
     [JsonPropertyName("permission_suggestions")]
     public JsonElement? PermissionSuggestions { get; init; }
+
+    /// <summary>Sub-agent identifier. Python commit 2f1fd38.</summary>
+    [JsonPropertyName("agent_id")]
+    public string? AgentId { get; init; }
+
+    /// <summary>Agent type name. Python commit 2f1fd38.</summary>
+    [JsonPropertyName("agent_type")]
+    public string? AgentType { get; init; }
 }
 
 /// <summary>
@@ -861,24 +1104,84 @@ public record SystemPromptPreset
     public string? Append { get; init; }
 
     /// <summary>
+    /// Strip per-user dynamic sections (working directory, auto-memory, git
+    /// status) from the system prompt so it stays static and cacheable across
+    /// users. Python commit 3bf8fd5.
+    /// </summary>
+    [JsonPropertyName("exclude_dynamic_sections")]
+    public bool? ExcludeDynamicSections { get; init; }
+
+    /// <summary>
     /// Creates a Claude Code preset system prompt with the specified append text.
     /// </summary>
     public static SystemPromptPreset ClaudeCode(string? append = null) =>
         new() { Preset = "claude_code", Append = append };
 }
 
+/// <summary>
+/// System prompt loaded from a file. Python commit 139b815.
+/// </summary>
+public record SystemPromptFile
+{
+    /// <summary>Type identifier. Always "file".</summary>
+    [JsonPropertyName("type")]
+    public string Type => "file";
+
+    /// <summary>Path to the system prompt file.</summary>
+    [JsonPropertyName("path")]
+    public required string Path { get; init; }
+}
+
+/// <summary>
+/// Tools preset configuration. When passed instead of a list, enables the
+/// CLI's default tool set. Python commit reference: ToolsPreset in types.py.
+/// </summary>
+public record ToolsPreset
+{
+    /// <summary>Type identifier. Always "preset".</summary>
+    [JsonPropertyName("type")]
+    public string Type => "preset";
+
+    /// <summary>The preset to use. Currently only "claude_code" is supported.</summary>
+    [JsonPropertyName("preset")]
+    public required string Preset { get; init; }
+
+    /// <summary>Creates a Claude Code tools preset.</summary>
+    public static ToolsPreset ClaudeCode() => new() { Preset = "claude_code" };
+}
+
+/// <summary>
+/// API-side task budget in tokens. Sent as output_config.task_budget with the
+/// task-budgets-2026-03-13 beta header. Python commit 2e60cec.
+/// </summary>
+public record TaskBudget(
+    [property: JsonPropertyName("total")] int Total
+);
+
 #endregion
 
 #region Agent and Sandbox Config
 
 /// <summary>
-/// Agent definition configuration.
+/// Agent definition configuration. Expanded by Python commits 028d591,
+/// fad1b84, 7c6902b.
 /// </summary>
+/// <param name="Effort"><see cref="EffortLevel"/> or int (token budget); use object? to model the union.</param>
+/// <param name="McpServers">List of server names (string) or inline {name: config} dict (object).</param>
 public record AgentDefinition(
     [property: JsonPropertyName("description")] string Description,
     [property: JsonPropertyName("prompt")] string Prompt,
     [property: JsonPropertyName("tools")] IReadOnlyList<string>? Tools = null,
-    [property: JsonPropertyName("model")] string? Model = null
+    [property: JsonPropertyName("model")] string? Model = null,
+    [property: JsonPropertyName("disallowedTools")] IReadOnlyList<string>? DisallowedTools = null,
+    [property: JsonPropertyName("skills")] IReadOnlyList<string>? Skills = null,
+    [property: JsonPropertyName("memory")] string? Memory = null,
+    [property: JsonPropertyName("mcpServers")] IReadOnlyList<object>? McpServers = null,
+    [property: JsonPropertyName("initialPrompt")] string? InitialPrompt = null,
+    [property: JsonPropertyName("maxTurns")] int? MaxTurns = null,
+    [property: JsonPropertyName("background")] bool? Background = null,
+    [property: JsonPropertyName("effort")] object? Effort = null,
+    [property: JsonPropertyName("permissionMode")] PermissionMode? PermissionMode = null
 );
 
 /// <summary>
@@ -894,6 +1197,18 @@ public record SdkPluginConfig(
 /// </summary>
 public record SandboxNetworkConfig
 {
+    /// <summary>Domain names that sandboxed processes can access. Python commit 92a4615.</summary>
+    [JsonPropertyName("allowedDomains")]
+    public IReadOnlyList<string>? AllowedDomains { get; init; }
+
+    /// <summary>Domains that are always blocked, even if matched by allowedDomains. Python commit 92a4615.</summary>
+    [JsonPropertyName("deniedDomains")]
+    public IReadOnlyList<string>? DeniedDomains { get; init; }
+
+    /// <summary>When true in managed settings, only managed-settings allowedDomains are respected. Python commit 92a4615.</summary>
+    [JsonPropertyName("allowManagedDomainsOnly")]
+    public bool? AllowManagedDomainsOnly { get; init; }
+
     [JsonPropertyName("allowUnixSockets")]
     public IReadOnlyList<string>? AllowUnixSockets { get; init; }
 
@@ -902,6 +1217,10 @@ public record SandboxNetworkConfig
 
     [JsonPropertyName("allowLocalBinding")]
     public bool? AllowLocalBinding { get; init; }
+
+    /// <summary>macOS only: XPC/Mach service names to allow (supports trailing wildcard).</summary>
+    [JsonPropertyName("allowMachLookup")]
+    public IReadOnlyList<string>? AllowMachLookup { get; init; }
 
     [JsonPropertyName("httpProxyPort")]
     public int? HttpProxyPort { get; init; }
@@ -960,6 +1279,12 @@ public interface IThinkingConfig
 {
     /// <summary>The thinking configuration type.</summary>
     string Type { get; }
+
+    /// <summary>
+    /// Optional thinking display mode forwarded as <c>--thinking-display</c>.
+    /// Python commit 32f09c1. Ignored for the Disabled variant.
+    /// </summary>
+    string? Display { get; }
 }
 
 /// <summary>
@@ -969,6 +1294,9 @@ public record ThinkingConfigAdaptive : IThinkingConfig
 {
     /// <inheritdoc />
     public string Type => "adaptive";
+
+    /// <inheritdoc />
+    public string? Display { get; init; }
 }
 
 /// <summary>
@@ -978,6 +1306,9 @@ public record ThinkingConfigEnabled(int BudgetTokens) : IThinkingConfig
 {
     /// <inheritdoc />
     public string Type => "enabled";
+
+    /// <inheritdoc />
+    public string? Display { get; init; }
 }
 
 /// <summary>
@@ -987,6 +1318,9 @@ public record ThinkingConfigDisabled : IThinkingConfig
 {
     /// <inheritdoc />
     public string Type => "disabled";
+
+    /// <inheritdoc />
+    public string? Display => null;
 }
 
 #endregion
@@ -1111,6 +1445,64 @@ public class ClaudeAgentOptions
 
     /// <summary>Enable file checkpointing.</summary>
     public bool EnableFileCheckpointing { get; init; }
+
+    /// <summary>
+    /// Tools preset (alternative to <see cref="Tools"/>). When set, indicates
+    /// the CLI's built-in tools preset should be used.
+    /// </summary>
+    public ToolsPreset? ToolsPreset { get; init; }
+
+    /// <summary>
+    /// Use a specific session ID for the conversation instead of an auto-generated one.
+    /// Must be a valid UUID. Python commit 5656d20.
+    /// </summary>
+    public string? SessionId { get; init; }
+
+    /// <summary>
+    /// API-side task budget in tokens. Sent as output_config.task_budget with
+    /// the task-budgets-2026-03-13 beta header. Python commit 2e60cec.
+    /// </summary>
+    public TaskBudget? TaskBudget { get; init; }
+
+    /// <summary>
+    /// Skills to enable. <c>null</c> = no SDK auto-configuration; empty list =
+    /// suppress every skill; <c>"all"</c> = enable every discovered skill;
+    /// list of names = enable only those. Python commit 1c26bd3.
+    /// </summary>
+    /// <remarks>
+    /// Modeled as <see cref="object"/> to capture the Python
+    /// <c>list[str] | Literal["all"] | None</c> union. Use either a
+    /// <see cref="string"/> ("all") or <see cref="IReadOnlyList{T}"/> of string.
+    /// </remarks>
+    public object? Skills { get; init; }
+
+    /// <summary>
+    /// When true, only use MCP servers passed via <see cref="McpServers"/>,
+    /// ignoring all other MCP configurations the CLI would otherwise load.
+    /// Maps to <c>--strict-mcp-config</c>. Python commit 32bcc4e.
+    /// </summary>
+    public bool StrictMcpConfig { get; init; }
+
+    /// <summary>
+    /// Include hook lifecycle events (PreToolUse, PostToolUse, Stop, etc.)
+    /// in the message stream as <see cref="HookEventMessage"/> objects.
+    /// Python commit c1182a4.
+    /// </summary>
+    public bool IncludeHookEvents { get; init; }
+
+    /// <summary>
+    /// Mirror session transcripts to an external store. Stub interface added
+    /// in Phase 2B; wiring (transport/handler integration) lands in Phase 3B.
+    /// Python commit 6e3d54f.
+    /// </summary>
+    public ISessionStore? SessionStore { get; init; }
+
+    /// <summary>
+    /// When to flush mirrored transcript entries to <see cref="SessionStore"/>.
+    /// Defaults to <see cref="SessionStoreFlushMode.Batched"/>.
+    /// Ignored when <see cref="SessionStore"/> is null. Python commit 0a69e94.
+    /// </summary>
+    public SessionStoreFlushMode SessionStoreFlush { get; init; } = SessionStoreFlushMode.Batched;
 }
 
 #endregion

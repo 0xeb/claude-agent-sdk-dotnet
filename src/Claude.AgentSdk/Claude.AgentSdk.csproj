@@ -8,7 +8,9 @@
 
     <!-- Package Info -->
     <PackageId>Claude.AgentSdk</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.2.82</Version>
+    <AssemblyVersion>0.2.82.0</AssemblyVersion>
+    <FileVersion>0.2.82.0</FileVersion>
     <Authors>Elias Bachaalany</Authors>
     <Company>0xeb</Company>
     <Product>Claude Agent SDK</Product>
@@ -20,7 +22,7 @@
     <RepositoryType>git</RepositoryType>
     <Copyright>Copyright (c) 2025 Elias Bachaalany</Copyright>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Initial release with full Python SDK parity.</PackageReleaseNotes>
+    <PackageReleaseNotes>Parity with Python claude-agent-sdk v0.2.82 (Phase 6B): SessionStore + conformance harness, materialized resume, context-usage / MCP-status surfaces, v0.2.82 message parser additions, new examples (SessionStores, SessionStoreUsage, SessionResume, ContextUsage, HookEvents).</PackageReleaseNotes>
 
     <!-- Build Settings -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>

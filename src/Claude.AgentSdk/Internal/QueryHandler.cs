@@ -35,6 +35,19 @@ internal class QueryHandler : IAsyncDisposable
     private TaskCompletionSource _firstResultEvent = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private JsonElement? _initializationResult;
 
+    // Python commit 9aafd84: suppress redundant ProcessError after error result.
+    // When the CLI emits a result with is_error=true and then exits non-zero,
+    // the trailing ProcessError carries no information beyond "exit code N".
+    // Replace it with the structured error the CLI already reported.
+    private string? _lastErrorResultText;
+
+    // Python commit 2c29362: inflight server-initiated control requests so we
+    // can cancel them on control_cancel_request.
+    private readonly Dictionary<string, CancellationTokenSource> _inflightRequests = new();
+
+    /// <summary>Mirror callback invoked when the CLI emits transcript_mirror frames.</summary>
+    public Action<JsonElement>? TranscriptMirrorHandler { get; set; }
+
     public QueryHandler(
         ITransport transport,
         ClaudeAgentOptions options,
@@ -122,6 +135,7 @@ internal class QueryHandler : IAsyncDisposable
 
     private async Task ReadMessagesLoopAsync(CancellationToken cancellationToken)
     {
+        Exception? finalException = null;
         try
         {
             await foreach (var message in _transport.ReadMessagesAsync(cancellationToken))
@@ -143,13 +157,56 @@ internal class QueryHandler : IAsyncDisposable
 
                 if (msgType == "control_request")
                 {
-                    _ = HandleControlRequestAsync(message, cancellationToken);
+                    var reqId = message.TryGetProperty("request_id", out var ridElem)
+                        ? ridElem.GetString()
+                        : null;
+                    if (reqId != null)
+                    {
+                        var cts = new CancellationTokenSource();
+                        await _lock.WaitAsync(CancellationToken.None);
+                        try
+                        {
+                            _inflightRequests[reqId] = cts;
+                        }
+                        finally
+                        {
+                            _lock.Release();
+                        }
+
+                        _ = HandleControlRequestAsync(message, reqId, cts);
+                    }
                     continue;
                 }
 
                 if (msgType == "control_cancel_request")
                 {
-                    // TODO: Implement cancellation support
+                    // Python commit 2c29362: cancel the matching inflight request.
+                    var cancelId = message.TryGetProperty("request_id", out var cidElem)
+                        ? cidElem.GetString()
+                        : null;
+                    if (cancelId != null)
+                    {
+                        await _lock.WaitAsync(CancellationToken.None);
+                        try
+                        {
+                            if (_inflightRequests.Remove(cancelId, out var cts))
+                            {
+                                try { cts.Cancel(); } catch { }
+                            }
+                        }
+                        finally
+                        {
+                            _lock.Release();
+                        }
+                    }
+                    continue;
+                }
+
+                if (msgType == "transcript_mirror")
+                {
+                    // Python commit 6e3d54f: peel mirror frames off stdout and
+                    // hand to the SessionStore batcher; do NOT yield to consumers.
+                    TranscriptMirrorHandler?.Invoke(message);
                     continue;
                 }
 
@@ -157,6 +214,45 @@ internal class QueryHandler : IAsyncDisposable
                 if (msgType == "result")
                 {
                     _firstResultEvent.TrySetResult();
+
+                    // Python commit 9aafd84: remember the error text from the
+                    // result, then suppress the trailing ProcessError below.
+                    if (message.TryGetProperty("is_error", out var isErr) &&
+                        isErr.ValueKind == JsonValueKind.True)
+                    {
+                        string? errorText = null;
+                        if (message.TryGetProperty("errors", out var errs) &&
+                            errs.ValueKind == JsonValueKind.Array)
+                        {
+                            var parts = new List<string>();
+                            foreach (var e in errs.EnumerateArray())
+                            {
+                                if (e.ValueKind == JsonValueKind.String)
+                                    parts.Add(e.GetString()!);
+                            }
+                            if (parts.Count > 0) errorText = string.Join("; ", parts);
+                        }
+                        if (string.IsNullOrEmpty(errorText) &&
+                            message.TryGetProperty("subtype", out var st) &&
+                            st.ValueKind == JsonValueKind.String)
+                        {
+                            errorText = st.GetString();
+                        }
+                        _lastErrorResultText = errorText ?? "unknown error";
+                    }
+                    else
+                    {
+                        _lastErrorResultText = null;
+                    }
+                }
+                else if (!(msgType == "system" &&
+                           message.TryGetProperty("subtype", out var sst) &&
+                           sst.ValueKind == JsonValueKind.String &&
+                           sst.GetString() == "session_state_changed"))
+                {
+                    // Anything other than the post-turn session_state_changed marker
+                    // means the conversation moved on; reset the suppression marker.
+                    _lastErrorResultText = null;
                 }
 
                 // Regular SDK messages go to the stream
@@ -169,13 +265,26 @@ internal class QueryHandler : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            // Python commit 9aafd84: replace ProcessError with the structured error
+            // the CLI already reported, so the exception is actionable.
+            Exception finalEx = ex;
+            if (ex is ProcessException pex && _lastErrorResultText != null)
+            {
+                finalEx = new ProcessException(
+                    $"Claude Code returned an error result: {_lastErrorResultText}",
+                    pex.ExitCode ?? -1,
+                    pex.Stderr ?? ""
+                );
+            }
+            finalException = finalEx;
+
             // Signal all pending control requests
             await _lock.WaitAsync(CancellationToken.None);
             try
             {
-                foreach (var (requestId, tcs) in _pendingRequests)
+                foreach (var (_, tcs) in _pendingRequests)
                 {
-                    tcs.TrySetException(ex);
+                    tcs.TrySetException(finalEx);
                 }
             }
             finally
@@ -185,7 +294,37 @@ internal class QueryHandler : IAsyncDisposable
         }
         finally
         {
-            _messageChannel.Writer.Complete();
+            // Unblock any waiters (e.g. string-prompt path waiting for first result)
+            // so they don't stall on early exit.
+            _firstResultEvent.TrySetResult();
+            // Python commit 9aafd84 (port): propagate the fatal exception through
+            // the message channel so ReceiveMessagesAsync re-throws it for the
+            // consumer instead of silently completing.
+            if (finalException != null)
+                _messageChannel.Writer.TryComplete(finalException);
+            else
+                _messageChannel.Writer.TryComplete();
+        }
+    }
+
+    private async Task HandleControlRequestAsync(JsonElement message, string requestId, CancellationTokenSource cts)
+    {
+        try
+        {
+            await HandleControlRequestInnerAsync(message, cts.Token);
+        }
+        finally
+        {
+            await _lock.WaitAsync(CancellationToken.None);
+            try
+            {
+                _inflightRequests.Remove(requestId);
+            }
+            finally
+            {
+                _lock.Release();
+            }
+            cts.Dispose();
         }
     }
 
@@ -226,7 +365,7 @@ internal class QueryHandler : IAsyncDisposable
         }
     }
 
-    private async Task HandleControlRequestAsync(JsonElement message, CancellationToken cancellationToken)
+    private async Task HandleControlRequestInnerAsync(JsonElement message, CancellationToken cancellationToken)
     {
         if (!message.TryGetProperty("request_id", out var requestIdElement) ||
             !message.TryGetProperty("request", out var request))
@@ -551,6 +690,48 @@ internal class QueryHandler : IAsyncDisposable
     }
 
     /// <summary>
+    /// Get a breakdown of current context window usage. Python commit ac900bd.
+    /// </summary>
+    public async Task<JsonElement> GetContextUsageAsync(CancellationToken cancellationToken = default)
+    {
+        return await SendControlRequestAsync(
+            new { subtype = "get_context_usage" },
+            TimeSpan.FromSeconds(60),
+            cancellationToken
+        );
+    }
+
+    /// <summary>Reconnect a disconnected or failed MCP server. Python commit 28f9b4b.</summary>
+    public async Task ReconnectMcpServerAsync(string serverName, CancellationToken cancellationToken = default)
+    {
+        await SendControlRequestAsync(
+            new { subtype = "mcp_reconnect", serverName },
+            TimeSpan.FromSeconds(60),
+            cancellationToken
+        );
+    }
+
+    /// <summary>Enable or disable an MCP server. Python commit 28f9b4b.</summary>
+    public async Task ToggleMcpServerAsync(string serverName, bool enabled, CancellationToken cancellationToken = default)
+    {
+        await SendControlRequestAsync(
+            new { subtype = "mcp_toggle", serverName, enabled },
+            TimeSpan.FromSeconds(60),
+            cancellationToken
+        );
+    }
+
+    /// <summary>Stop a running task. Python commit 28f9b4b.</summary>
+    public async Task StopTaskAsync(string taskId, CancellationToken cancellationToken = default)
+    {
+        await SendControlRequestAsync(
+            new { subtype = "stop_task", task_id = taskId },
+            TimeSpan.FromSeconds(60),
+            cancellationToken
+        );
+    }
+
+    /// <summary>
     /// Stream input messages to transport.
     /// </summary>
     public async Task StreamInputAsync(
@@ -590,7 +771,9 @@ internal class QueryHandler : IAsyncDisposable
     {
         await foreach (var json in _messageChannel.Reader.ReadAllAsync(cancellationToken))
         {
-            yield return MessageParser.Parse(json);
+            var msg = MessageParser.ParseOrNull(json);
+            if (msg != null)
+                yield return msg;
         }
     }
 
@@ -626,6 +809,10 @@ internal class QueryHandler : IAsyncDisposable
             try { await readTask; }
             catch { }
         }
+
+        // Python commit 91998d3: close receive stream on disconnect so consumers
+        // observing ReceiveMessagesAsync exit cleanly instead of hanging.
+        _messageChannel.Writer.TryComplete();
 
         await _transport.CloseAsync();
     }

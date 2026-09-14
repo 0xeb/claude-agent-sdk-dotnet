@@ -20,6 +20,8 @@ A modern .NET library for interacting with the Claude Code CLI, providing both a
 - Source-generated JSON models for message types
 - Well-tested: 109 tests (90 unit + 19 integration; integration tests are disabled by default)
 
+> **Parity:** This release tracks Python `claude-agent-sdk` v0.2.82. See [CHANGELOG.md](CHANGELOG.md) for details.
+
 ## Prerequisites
 
 - .NET 8.0 or .NET 9.0
