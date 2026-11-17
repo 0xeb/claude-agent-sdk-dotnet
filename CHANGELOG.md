@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- In-process (`sdk`) MCP servers now leave unset optional fields out of their replies instead of sending
+  them as `null`. Claude Code rejected a `tools/list` reply with `"annotations": null`, so the server showed as
+  connected but none of its tools were offered. Prompt and resource fields are now sent in camelCase as MCP
+  expects.
+
 ## 0.2.82 — Parity with Python claude-agent-sdk v0.2.82
 
 ### Added

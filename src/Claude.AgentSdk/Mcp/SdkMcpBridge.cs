@@ -2,6 +2,7 @@
 // SDK MCP Server Bridge - enables in-process MCP servers via handler registration
 
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Claude.AgentSdk.Mcp;
 
@@ -247,6 +248,16 @@ internal class SdkMcpBridge : IAsyncDisposable
     private readonly McpServerHandlers _handlers;
     private readonly string _serverName;
     private readonly SemaphoreSlim _lock = new(1, 1);
+
+    // MCP clients validate replies against the protocol schema, where optional fields may be left out but not
+    // sent as null: Claude Code drops a tools/list reply carrying "annotations": null, so the server shows as
+    // connected with no tools. Members without a JsonPropertyName (prompts, resources) get the protocol's camelCase.
+    private static readonly JsonSerializerOptions ResponseJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
     private bool _disposed;
 
     /// <summary>
@@ -305,7 +316,7 @@ internal class SdkMcpBridge : IAsyncDisposable
                         jsonrpc = "2.0",
                         id = id.ValueKind != JsonValueKind.Undefined ? (object?)id.Clone() : null,
                         result = new { }
-                    });
+                    }, ResponseJsonOptions);
                 }
 
                 result = method switch
@@ -333,7 +344,7 @@ internal class SdkMcpBridge : IAsyncDisposable
                     jsonrpc = "2.0",
                     id = id.ValueKind != JsonValueKind.Undefined ? (object?)id.Clone() : null,
                     error = new { code = -32603, message = error }
-                });
+                }, ResponseJsonOptions);
             }
 
             return JsonSerializer.SerializeToElement(new
@@ -341,7 +352,7 @@ internal class SdkMcpBridge : IAsyncDisposable
                 jsonrpc = "2.0",
                 id = id.ValueKind != JsonValueKind.Undefined ? (object?)id.Clone() : null,
                 result
-            });
+            }, ResponseJsonOptions);
         }
         finally
         {

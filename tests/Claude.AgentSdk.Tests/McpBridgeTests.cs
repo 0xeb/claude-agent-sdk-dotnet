@@ -301,6 +301,87 @@ public class McpBridgeTests
     }
 
     [Fact]
+    public async Task SdkMcpBridge_ToolsListOmitsUnsetOptionalFields()
+    {
+        // Claude Code rejects a tools/list reply with optional fields sent as null, leaving the server with no tools.
+        var handlers = new McpServerHandlers
+        {
+            ListTools = ct => Task.FromResult<IReadOnlyList<McpToolDefinition>>([
+                new McpToolDefinition
+                {
+                    Name = "query",
+                    InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
+                    Annotations = new McpToolAnnotations { ReadOnlyHint = true }
+                },
+                new McpToolDefinition { Name = "bare", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }
+            ])
+        };
+
+        await using var bridge = new SdkMcpBridge(handlers, "db");
+        await bridge.StartAsync();
+
+        var request = JsonSerializer.SerializeToElement(new { jsonrpc = "2.0", id = 6, method = "tools/list" });
+        var tools = (await bridge.SendMessageAsync(request)).GetProperty("result").GetProperty("tools");
+
+        var annotated = tools[0];
+        Assert.False(annotated.TryGetProperty("description", out _));
+        var annotations = annotated.GetProperty("annotations");
+        Assert.True(annotations.GetProperty("readOnlyHint").GetBoolean());
+        Assert.False(annotations.TryGetProperty("title", out _));
+        Assert.False(annotations.TryGetProperty("destructiveHint", out _));
+
+        Assert.False(tools[1].TryGetProperty("annotations", out _));
+    }
+
+    [Fact]
+    public async Task SdkMcpBridge_ToolsCallOmitsNullContentData()
+    {
+        var handlers = new McpServerHandlers
+        {
+            CallTool = (name, args, ct) => Task.FromResult(new McpToolResult
+            {
+                Content = [new McpContent { Type = "text", Text = "ok" }]
+            })
+        };
+
+        await using var bridge = new SdkMcpBridge(handlers, "db");
+        await bridge.StartAsync();
+
+        var request = JsonSerializer.SerializeToElement(new
+        {
+            jsonrpc = "2.0",
+            id = 7,
+            method = "tools/call",
+            @params = new { name = "query", arguments = new { } }
+        });
+        var content = (await bridge.SendMessageAsync(request)).GetProperty("result").GetProperty("content")[0];
+
+        Assert.Equal("ok", content.GetProperty("text").GetString());
+        Assert.False(content.TryGetProperty("data", out _));
+    }
+
+    [Fact]
+    public async Task SdkMcpBridge_PromptsListUsesProtocolFieldNames()
+    {
+        var handlers = new McpServerHandlers
+        {
+            ListPrompts = ct => Task.FromResult<IReadOnlyList<McpPromptDefinition>>([
+                new McpPromptDefinition { Name = "greet", Arguments = [new McpPromptArgument { Name = "who", Required = true }] }
+            ])
+        };
+
+        await using var bridge = new SdkMcpBridge(handlers, "prompts");
+        await bridge.StartAsync();
+
+        var request = JsonSerializer.SerializeToElement(new { jsonrpc = "2.0", id = 8, method = "prompts/list" });
+        var prompt = (await bridge.SendMessageAsync(request)).GetProperty("result").GetProperty("prompts")[0];
+
+        Assert.Equal("greet", prompt.GetProperty("name").GetString());
+        Assert.False(prompt.TryGetProperty("description", out _));
+        Assert.True(prompt.GetProperty("arguments")[0].GetProperty("required").GetBoolean());
+    }
+
+    [Fact]
     public async Task SdkMcpBridge_HandlesToolsCallMessage()
     {
         var handlers = new McpServerHandlers
